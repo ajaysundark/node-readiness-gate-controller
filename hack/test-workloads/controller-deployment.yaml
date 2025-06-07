@@ -25,6 +25,7 @@ spec:
       containers:
       - name: controller
         image: your-registry/readiness-gate-controller:latest
+        imagePullPolicy: Never # local testing
         command:
         - /manager
         env:
