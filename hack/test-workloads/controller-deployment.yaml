@@ -13,6 +13,14 @@ spec:
       labels:
         app: readiness-gate-controller
     spec:
+      # Use tolerations to allow scheduling on control plane nodes
+      # This is necessary for testing purposes, as the controller needs to run outside the worker nodes
+      tolerations:
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
       serviceAccountName: readiness-gate-controller
       containers:
       - name: controller
