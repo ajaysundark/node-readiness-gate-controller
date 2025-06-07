@@ -1,0 +1,131 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: npd-config
+  namespace: kube-system
+data:
+  cni-health.json: |
+    {
+      "plugin": "custom",
+      "pluginConfig": {
+        "invoke_interval": "30s",
+        "timeout": "10s",
+        "max_output_length": 80,
+        "concurrency": 1,
+        "enable_message_change_based_condition_update": false
+      },
+      "source": "cni-health-monitor",
+      "conditions": [
+        {
+          "type": "network.kubernetes.io/CNIReady",
+          "reason": "CNIHealthy",
+          "message": "CNI is functioning correctly"
+        }
+      ],
+      "rules": [
+        {
+          "type": "permanent",
+          "condition": "network.kubernetes.io/CNIReady",
+          "reason": "CNIHealthy",
+          "message": "CNI health check passed - all endpoints responding"
+        },
+        {
+          "type": "permanent",
+          "condition": "network.kubernetes.io/CNIReady",
+          "reason": "CNIUnhealthy",
+          "message": "CNI health check failed - endpoints not responding"
+        }
+      ]
+    }
+  
+  cni-health-monitor.sh: |
+    #!/bin/bash
+    
+    # CNI Health Monitor Script for NPD
+    # This script checks CNI health endpoints and exits with appropriate codes
+    
+    set -euo pipefail
+    
+    CNI_HEALTH_ENDPOINTS=(
+      "http://127.0.0.1:9099/healthz"  # Common CNI health endpoint
+      "http://127.0.0.1:61679/healthz" # Calico health endpoint
+      "http://127.0.0.1:10248/healthz" # Kubelet health (as fallback)
+    )
+    
+    CNI_DIRS=(
+      "/opt/cni/bin"
+      "/etc/cni/net.d"
+    )
+    
+    log() {
+      echo "$(date '+%Y-%m-%d %H:%M:%S') - $*"
+    }
+    
+    check_cni_directories() {
+      log "Checking CNI directories..."
+      for dir in "${CNI_DIRS[@]}"; do
+        if [[ ! -d "$dir" ]]; then
+          log "ERROR: CNI directory $dir does not exist"
+          return 1
+        fi
+      done
+      log "CNI directories check passed"
+      return 0
+    }
+    
+    check_cni_health_endpoints() {
+      log "Checking CNI health endpoints..."
+      
+      for endpoint in "${CNI_HEALTH_ENDPOINTS[@]}"; do
+        log "Checking endpoint: $endpoint"
+        
+        if curl -f -s --max-time 5 "$endpoint" >/dev/null 2>&1; then
+          log "SUCCESS: Health endpoint $endpoint is responding"
+          return 0
+        else
+          log "WARNING: Health endpoint $endpoint is not responding"
+        fi
+      done
+      
+      log "ERROR: No CNI health endpoints are responding"
+      return 1
+    }
+    
+    check_network_interfaces() {
+      log "Checking network interfaces..."
+      
+      # Check if we have basic network interfaces
+      if ! ip link show | grep -q "cni\|veth\|flannel\|calico"; then
+        log "WARNING: No CNI-related network interfaces found"
+        # Don't fail on this as it might be too early in startup
+      else
+        log "CNI network interfaces detected"
+      fi
+      
+      return 0
+    }
+    
+    main() {
+      log "Starting CNI health check..."
+      
+      # Basic directory check
+      if ! check_cni_directories; then
+        log "FAILED: CNI directories check failed"
+        exit 1
+      fi
+      
+      # Network interfaces check (informational)
+      check_network_interfaces
+      
+      # Health endpoint check
+      if check_cni_health_endpoints; then
+        log "SUCCESS: CNI health check passed"
+        exit 0
+      else
+        log "FAILED: CNI health check failed"
+        exit 1
+      fi
+    }
+    
+    # Execute main function
+    main "$@"

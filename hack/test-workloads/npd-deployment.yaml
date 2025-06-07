@@ -1,0 +1,131 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-problem-detector
+  namespace: kube-system
+  labels:
+    app: node-problem-detector
+spec:
+  selector:
+    matchLabels:
+      app: node-problem-detector
+  template:
+    metadata:
+      labels:
+        app: node-problem-detector
+    spec:
+      serviceAccountName: node-problem-detector
+      hostNetwork: true
+      hostPID: true
+      # tolerations:
+      # - operator: Exists
+      #   effect: NoSchedule
+      containers:
+      - name: node-problem-detector
+        image: registry.k8s.io/node-problem-detector/node-problem-detector:v0.8.19
+        command:
+        - /node-problem-detector
+        - --logtostderr
+        - --config.custom-plugin-monitor=/config/cni-health.json
+        - --custom-plugin-monitor.config-dir=/config
+        - --v=2
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        volumeMounts:
+        - name: config
+          mountPath: /config
+          readOnly: true
+        - name: host-root
+          mountPath: /host
+          readOnly: true
+        - name: host-var-log
+          mountPath: /var/log
+          readOnly: true
+        - name: host-dev
+          mountPath: /dev
+          readOnly: true
+        - name: host-proc
+          mountPath: /host/proc
+          readOnly: true
+        - name: host-sys
+          mountPath: /host/sys
+          readOnly: true
+        - name: host-opt-cni
+          mountPath: /opt/cni
+          readOnly: true
+        - name: host-etc-cni
+          mountPath: /etc/cni
+          readOnly: true
+        resources:
+          limits:
+            cpu: 10m
+            memory: 80Mi
+          requests:
+            cpu: 10m
+            memory: 80Mi
+        securityContext:
+          privileged: true
+      volumes:
+      - name: config
+        configMap:
+          name: npd-config
+          defaultMode: 0755
+      - name: host-root
+        hostPath:
+          path: /
+      - name: host-var-log
+        hostPath:
+          path: /var/log
+      - name: host-dev
+        hostPath:
+          path: /dev
+      - name: host-proc 
+        hostPath:
+          path: /proc
+      - name: host-sys
+        hostPath:
+          path: /sys
+      - name: host-opt-cni
+        hostPath:
+          path: /opt/cni
+      - name: host-etc-cni
+        hostPath:
+          path: /etc/cni
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: node-problem-detector
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: node-problem-detector
+rules:
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "patch", "update"]
+- apiGroups: [""]
+  resources: ["nodes/status"]
+  verbs: ["patch", "update"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: node-problem-detector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: node-problem-detector
+subjects:
+- kind: ServiceAccount
+  name: node-problem-detector
+  namespace: kube-system

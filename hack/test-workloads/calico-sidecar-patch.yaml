@@ -1,0 +1,102 @@
+# This file is used to patch a node-readiness sidecar container in the Calico manifest.
+# original calico manifest https://raw.githubusercontent.com/projectcalico/calico/v3.30.1/manifests/calico.yaml
+spec:
+  template:
+    spec:
+      containers:
+      - name: cni-monitor
+        image: curlimages/curl:8.4.0
+        command:
+        - /bin/sh
+        - -c
+        - |
+          NODE_NAME=${NODE_NAME}
+          
+          update_node_condition() {
+            local status="$1"
+            local reason="$2"
+            local message="$3"
+            
+            # Create condition patch
+            local patch="{
+              \"status\": {
+                \"conditions\": [{
+                  \"type\": \"network.kubernetes.io/CNIReady\",
+                  \"status\": \"$status\",
+                  \"reason\": \"$reason\",
+                  \"message\": \"$message\",
+                  \"lastTransitionTime\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
+                }]
+              }
+            }"
+            
+            # Update node status
+            curl -X PATCH \
+              -H "Authorization: Bearer $(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" \
+              -H "Content-Type: application/merge-patch+json" \
+              -d "$patch" \
+              --cacert /var/run/secrets/kubernetes.io/serviceaccount/ca.crt \
+              "https://kubernetes.default.svc/api/v1/nodes/$NODE_NAME/status" \
+              --silent --show-error || echo "Failed to update node condition"
+          }
+          
+          check_cni_health() {
+            local health_endpoints=(
+              "http://127.0.0.1:9099/healthz"
+              "http://127.0.0.1:61679/healthz"
+            )
+            
+            for endpoint in "${health_endpoints[@]}"; do
+              if curl -f -s --max-time 5 "$endpoint" >/dev/null; then
+                return 0
+              fi
+            done
+            
+            # Fallback: check for CNI directories
+            if [ -d "/host/opt/cni/bin" ] && [ -d "/host/etc/cni/net.d" ]; then
+              return 0
+            fi
+            
+            return 1
+          }
+          
+          echo "Starting CNI status monitor for node: $NODE_NAME"
+          
+          while true; do
+            if check_cni_health; then
+              echo "CNI health check passed"
+              update_node_condition "True" "CNIHealthy" "CNI is functioning correctly"
+            else
+              echo "CNI health check failed"
+              update_node_condition "False" "CNIUnhealthy" "CNI health check failed"
+            fi
+            
+            sleep 30
+          done
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        volumeMounts:
+        - name: host-opt
+          mountPath: /host/opt
+          readOnly: true
+        - name: host-etc
+          mountPath: /host/etc
+          readOnly: true
+        resources:
+          limits:
+            cpu: 10m
+            memory: 32Mi
+          requests:
+            cpu: 10m
+            memory: 32Mi
+      volumes:
+      - name: host-opt
+        hostPath:
+          path: /opt
+      - name: host-etc
+        hostPath:
+          path: /etc
+      terminationGracePeriodSeconds: 30
