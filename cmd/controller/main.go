@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -52,6 +53,13 @@ func main() {
 
 	// Create controller
 	ctrl := controller.NewReadinessGateController(clientset, gateCfg)
+
+	// Healthcheck endpoint
+	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+	go http.ListenAndServe(":8081", nil)
 
 	// Setup signal handling
 	ctx, cancel := context.WithCancel(context.Background())
