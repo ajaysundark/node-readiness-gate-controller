@@ -45,9 +45,6 @@ nodes:
 - role: control-plane
 - role: worker
 - role: worker
-networking:
-  disableDefaultCNI: true
-  podSubnet: 192.168.0.0/16
 EOF
 
 kind create cluster --config values.yaml --name nrg
@@ -62,25 +59,33 @@ kind load docker-image your-registry/readiness-gate-controller:latest --name nrg
 3. Deploy readiness-controller into control-plane node
 
 ```
-kubectl apply -f test-workloads/controller-deployment.yaml
+kubectl apply -f hack/test-workloads/controller-deployment.yaml
 ```
 
-4. Worker A: side-car watches condition
+4. Deploy Calico CNI 
 
-```
-kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.30.1/manifests/calico.yaml
-kubectl apply -f test-workloads/calico-node-status-patch-role.yaml
-kubectl apply -f test-workloads/calico-sidecar-patch.yaml
-```
-
-5. Worker B: NPD watches condition additionally (for high-reliability)
-
+4.1 Apply Calico CNI manifests to the cluster:
 ```
 kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.30.1/manifests/calico.yaml
-kubectl apply -f test-workloads/calico-node-status-patch-role.yaml
-kubectl apply -f test-workloads/calico-sidecar-patch.yaml
-kubectl apply -f npd-cni-readiness-plugin/npd-config.yaml
-kubectl apply -f test-workloads/npd-deployment.yaml
+```
+
+4.2 Apply necessary patches and configurations:
+```
+# Need to patch felix component (calico-node-daemon) to enable healthz endpoint
+kubectl patch felixconfigurations.crd.projectcalico.org --type="merge" default --patch-file hack/test-workloads/calico-config-enable-healthz-endpoint.yaml
+# Create necessary RBAC for the health-monitoring container
+kubectl apply -f hack/test-workloads/calico-rbac-node-status-patch-role.yaml
+# Apply patch for calico sidecar to monitor CNI readiness
+kubectl patch ds --type="merge" calico-node --patch-file hack/test-workloads/calico-sidecar-to-patch-condition.yaml
+```
+
+5. Worker A: side-car watches condition (no other action required)
+6. Worker B: Additionally NPD watches condition (for high-reliability)
+
+```
+# Apply NPD manifests for worker B
+kubectl apply -f hack/npd-cni-readiness-plugin/npd-config.yaml
+kubectl apply -f hack/test-workloads/npd-deployment.yaml
 ```
 
 ## Community, discussion, contribution, and support

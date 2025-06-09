@@ -1,0 +1,4 @@
+# This file is used to patch a FelixConfiguration to enable healthz endpoint for Calico-Node.
+# original calico manifest https://raw.githubusercontent.com/projectcalico/calico/v3.30.1/manifests/calico.yaml
+spec:
+  healthEnabled: true
