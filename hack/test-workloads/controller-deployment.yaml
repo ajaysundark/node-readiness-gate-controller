@@ -26,7 +26,7 @@ spec:
         node-role.kubernetes.io/control-plane: ""
       serviceAccountName: readiness-gate-controller
       containers:
-      - name: controller
+      - name: readiness-controller
         image: your-registry/readiness-gate-controller:latest
         imagePullPolicy: Never # local testing
         command:
