@@ -27,13 +27,13 @@ data:
           "type": "permanent",
           "condition": "network.kubernetes.io/CNIReady",
           "reason": "CNIHealthy",
-          "message": "CNI health check passed - all endpoints responding"
+          "message": "CNI health check passed"
         },
         {
           "type": "permanent",
           "condition": "network.kubernetes.io/CNIReady",
           "reason": "CNIUnhealthy",
-          "message": "CNI health check failed - endpoints not responding"
+          "message": "CNI health check failed"
         }
       ]
     }
@@ -47,16 +47,9 @@ data:
     set -euo pipefail
     
     CNI_HEALTH_ENDPOINTS=(
-      "http://127.0.0.1:9099/healthz"  # Common CNI health endpoint
-      "http://127.0.0.1:61679/healthz" # Calico health endpoint
-      "http://127.0.0.1:10248/healthz" # Kubelet health (as fallback)
+      "http://127.0.0.1:9099/readiness"
     )
-    
-    CNI_DIRS=(
-      "/opt/cni/bin"
-      "/etc/cni/net.d"
-    )
-    
+        
     log() {
       echo "$(date '+%Y-%m-%d %H:%M:%S') - $*"
     }

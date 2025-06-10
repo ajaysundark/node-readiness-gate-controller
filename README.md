@@ -80,6 +80,13 @@ kubectl patch daemonset calico-node -n kube-system --type=json --patch-file hack
 ```
 
 5. Worker A: side-car watches condition (no other action required)
+```bash
+# simulate component failure by turning down health endpoint at one node
+chmod +x ./hack/test-workloads/simulate-component-failure-at-host.sh
+sh hack/test-workloads/simulate-component-failure-at-host.sh
+```
+* This script will kill 'calico-node' container at node `kind-worker`.
+* The side-car will observe component status change, and patch the condition `network.kubernetes.io/CNIReady` to `False` on the node `kind-worker`. Node-Readiness controller will taint `node.kubernetes.io/readiness-gates-pending`.
 
 6. Worker B: Additionally NPD watches condition (for high-reliability)
 
