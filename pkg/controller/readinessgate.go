@@ -8,13 +8,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 )
 
-// ReadinessGateConfig defines the configuration for a node readiness gate
-type ReadinessGateConfig struct {
+// NodeReadinessRule defines the desired state for a component readiness in a node
+type NodeReadinessRule struct {
 	ConditionType  string                 `json:"conditionType"`
 	TaintKey       string                 `json:"taintKey"`
 	TaintEffect    corev1.TaintEffect     `json:"taintEffect"`
@@ -24,22 +25,15 @@ type ReadinessGateConfig struct {
 
 // ReadinessGateController manages node taints based on node conditions
 type ReadinessGateController struct {
-	clientset    kubernetes.Interface
-	nodeInformer cache.SharedIndexInformer
-	config       ReadinessGateConfig
-	stopCh       <-chan struct{}
+	clientset      kubernetes.Interface
+	nodeInformer   cache.SharedIndexInformer
+	readinessRules map[string]*NodeReadinessRule // conditionType -> readiness-rule
 }
 
 // NewReadinessGateController creates a new ReadinessGateController
 func NewReadinessGateController(
 	clientset kubernetes.Interface,
-	config ReadinessGateConfig,
 ) *ReadinessGateController {
-
-	// Create node informer
-	// informersFactory := informers.NewSharedInformerFactory(clientset, 0)
-	// nodeInformer := informersFactory.Core().V1().Nodes()
-
 	watchlist := cache.NewListWatchFromClient(
 		clientset.CoreV1().RESTClient(),
 		"nodes",
@@ -55,9 +49,9 @@ func NewReadinessGateController(
 	)
 
 	controller := &ReadinessGateController{
-		clientset:    clientset,
-		nodeInformer: informer,
-		config:       config,
+		clientset:      clientset,
+		nodeInformer:   informer,
+		readinessRules: make(map[string]*NodeReadinessRule),
 	}
 
 	// Add event handlers
@@ -68,6 +62,18 @@ func NewReadinessGateController(
 	})
 
 	return controller
+}
+
+// AddReadinessRule updates the cached NodeReadinessRules
+func (r *ReadinessGateController) AddReadinessRule(rule *NodeReadinessRule) {
+	klog.Infof("Adding readiness rule: %s", rule.ConditionType)
+	r.readinessRules[rule.ConditionType] = rule
+}
+
+// RemoveReadinessRule removes a readiness rule from the controller
+func (r *ReadinessGateController) RemoveReadinessRule(conditionType string) {
+	delete(r.readinessRules, conditionType)
+	klog.Infof("Removed readiness rule: %s", conditionType)
 }
 
 // Run starts the controller
@@ -111,69 +117,84 @@ func (c *ReadinessGateController) handleNodeDelete(obj interface{}) {
 
 func (c *ReadinessGateController) processNode(node *corev1.Node) {
 	// Check if node matches selector
-	if !c.nodeMatches(node) {
-		klog.Infof("Node %s does not match selector, skipping", node.Name)
-		return
-	}
+	applicableRules := c.getApplicableRulesForNode(node)
 
-	// Get the condition status
-	conditionStatus := c.getConditionStatus(node)
-	klog.Infof("Node %s condition %s status: %s",
-		node.Name, c.config.ConditionType, conditionStatus)
+	for _, readinessRule := range applicableRules {
+		// Retrieve the condition status
+		conditionStatus := c.getConditionStatus(node, readinessRule.ConditionType)
 
-	// Determine if taint should be present
-	shouldHaveTaint := conditionStatus != c.config.RequiredStatus
-	hasTaint := c.hasTaint(node)
+		// Determine if taint should be present
+		shouldHaveTaint := conditionStatus != readinessRule.RequiredStatus
+		hasTaint := c.hasTaint(node, readinessRule.TaintKey, readinessRule.TaintEffect)
 
-	klog.Infof("Node %s: shouldHaveTaint=%t, hasTaint=%t",
-		node.Name, shouldHaveTaint, hasTaint)
+		klog.V(4).Info("Processing condition",
+			"node", node.Name,
+			"conditionType", readinessRule.ConditionType,
+			"conditionStatus", conditionStatus,
+			"requiredStatus", readinessRule.RequiredStatus,
+			"shouldHaveTaint", shouldHaveTaint,
+			"hasTaint", hasTaint)
 
-	// Update taint if needed
-	if shouldHaveTaint && !hasTaint {
-		c.addTaint(node)
-	} else if !shouldHaveTaint && hasTaint {
-		c.removeTaint(node)
+		// Update taint if needed
+		if shouldHaveTaint && !hasTaint {
+			c.addTaint(node, readinessRule.TaintKey, readinessRule.TaintEffect)
+		} else if !shouldHaveTaint && hasTaint {
+			c.removeTaint(node, readinessRule.TaintKey, readinessRule.TaintEffect)
+		}
 	}
 }
 
-func (c *ReadinessGateController) nodeMatches(node *corev1.Node) bool {
-	if len(c.config.NodeSelector) == 0 {
+func (r *ReadinessGateController) getApplicableRulesForNode(node *corev1.Node) []*NodeReadinessRule {
+	var applicableRules []*NodeReadinessRule
+	for _, rule := range r.readinessRules {
+		if r.ruleAppliesTo(rule, node) {
+			applicableRules = append(applicableRules, rule)
+		}
+	}
+	return applicableRules
+}
+
+// ruleAppliesTo check if node matches selector
+func (r *ReadinessGateController) ruleAppliesTo(rule *NodeReadinessRule, node *corev1.Node) bool {
+	if len(rule.NodeSelector) == 0 {
 		return true
 	}
 
-	for key, value := range c.config.NodeSelector {
-		if nodeValue, exists := node.Labels[key]; !exists || nodeValue != value {
-			return false
-		}
+	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+		MatchLabels: rule.NodeSelector,
+	})
+	if err != nil {
+		klog.Errorf("Failed to parse node selector: %v", err)
+		return false
 	}
 
-	return true
+	return selector.Matches(labels.Set(node.Labels))
 }
 
-func (c *ReadinessGateController) getConditionStatus(node *corev1.Node) corev1.ConditionStatus {
+func (c *ReadinessGateController) getConditionStatus(node *corev1.Node, conditionType string) corev1.ConditionStatus {
 	for _, condition := range node.Status.Conditions {
-		if condition.Type == corev1.NodeConditionType(c.config.ConditionType) {
+		if condition.Type == corev1.NodeConditionType(conditionType) {
 			return condition.Status
 		}
 	}
 	return corev1.ConditionUnknown
 }
 
-func (c *ReadinessGateController) hasTaint(node *corev1.Node) bool {
+func (c *ReadinessGateController) hasTaint(node *corev1.Node, taintKey string, taintEffect corev1.TaintEffect) bool {
 	for _, taint := range node.Spec.Taints {
-		if taint.Key == c.config.TaintKey && taint.Effect == c.config.TaintEffect {
+		if taint.Key == taintKey && taint.Effect == taintEffect {
 			return true
 		}
 	}
 	return false
 }
 
-func (c *ReadinessGateController) addTaint(node *corev1.Node) {
-	klog.Infof("Adding taint %s to node %s", c.config.TaintKey, node.Name)
+func (c *ReadinessGateController) addTaint(node *corev1.Node, taintKey string, taintEffect corev1.TaintEffect) {
+	klog.Infof("Adding taint %s to node %s", taintKey, node.Name)
 
 	newTaint := corev1.Taint{
-		Key:       c.config.TaintKey,
-		Effect:    c.config.TaintEffect,
+		Key:       taintKey,
+		Effect:    taintEffect,
 		TimeAdded: &metav1.Time{Time: time.Now()},
 	}
 
@@ -191,8 +212,8 @@ func (c *ReadinessGateController) addTaint(node *corev1.Node) {
 	}
 }
 
-func (c *ReadinessGateController) removeTaint(node *corev1.Node) {
-	klog.Infof("Removing taint %s from node %s", c.config.TaintKey, node.Name)
+func (c *ReadinessGateController) removeTaint(node *corev1.Node, taintKey string, taintEffect corev1.TaintEffect) {
+	klog.Infof("Removing taint %s from node %s", taintKey, node.Name)
 
 	// Create a copy of the node
 	nodeCopy := node.DeepCopy()
@@ -200,7 +221,7 @@ func (c *ReadinessGateController) removeTaint(node *corev1.Node) {
 	// Remove the taint
 	var newTaints []corev1.Taint
 	for _, taint := range nodeCopy.Spec.Taints {
-		if !(taint.Key == c.config.TaintKey && taint.Effect == c.config.TaintEffect) {
+		if !(taint.Key == taintKey && taint.Effect == taintEffect) {
 			newTaints = append(newTaints, taint)
 		}
 	}

@@ -43,16 +43,23 @@ func main() {
 		klog.Fatalf("Failed to create clientset: %v", err)
 	}
 
-	// Hardcoded readiness gate for CNI readiness
-	gateCfg := controller.ReadinessGateConfig{
-		ConditionType:  "network.kubernetes.io/CNIReady",
-		TaintKey:       "node.kubernetes.io/cni-not-ready",
-		TaintEffect:    corev1.TaintEffectNoSchedule,
-		RequiredStatus: corev1.ConditionTrue,
+	// Create controller
+	ctrl := controller.NewReadinessGateController(clientset)
+
+	// Hardcoded readiness requirements for nodes
+	readinessRequirements := []controller.NodeReadinessRule{
+		// CNI readiness
+		{
+			ConditionType:  "network.kubernetes.io/CNIReady",
+			TaintKey:       "readiness.k8s.io/cni-not-ready",
+			TaintEffect:    corev1.TaintEffectNoSchedule,
+			RequiredStatus: corev1.ConditionTrue,
+		},
 	}
 
-	// Create controller
-	ctrl := controller.NewReadinessGateController(clientset, gateCfg)
+	for _, req := range readinessRequirements {
+		ctrl.AddReadinessRule(&req)
+	}
 
 	// Healthcheck endpoint
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
