@@ -4,9 +4,7 @@ metadata:
   name: network-readiness-rule
 spec:
   conditions:
-    - type: "network.kubernetes.io/CNIReady"
-      requiredStatus: "True"
-    - type: "network.kubernetes.io/NetworkProxyReady"
+    - type: "network.k8s.io/CalicoReady"
       requiredStatus: "True"
   taint:
     key: "readiness.k8s.io/NetworkReady"
