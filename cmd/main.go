@@ -66,9 +66,8 @@ func main() {
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
-	flag.BoolVar(&enableWebhook, "enable-webhook", true,
-		"Enable webhook for the controller manager. Requires TLS certificates to be configured.")
-	flag.Parse()
+	flag.BoolVar(&enableWebhook, "enable-webhook", false,
+		"Enable validation webhook. Requires TLS certificates to be configured.")
 
 	opts := zap.Options{
 		Development:     true,
@@ -130,15 +129,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	if !enableWebhook {
-		setupLog.Info("webhook is disabled")
-	} else {
+	// Setup webhook (conditional based on flag)
+	if enableWebhook {
 		nodeReadinessWebhook := webhook.NewNodeReadinessGateRuleWebhook(mgr.GetClient())
 		if err := nodeReadinessWebhook.SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "NodeReadinessGateRule")
 			os.Exit(1)
 		}
-		setupLog.Info("webhook is enabled")
+		setupLog.Info("webhook enabled")
+	} else {
+		setupLog.Info("webhook disabled")
 	}
 	// +kubebuilder:scaffold:builder
 

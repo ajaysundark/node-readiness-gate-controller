@@ -1,0 +1,13 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: validating-webhook-configuration
+  annotations:
+    cert-manager.io/inject-ca-from: $(CERTIFICATE_NAMESPACE)/$(CERTIFICATE_NAME)
+webhooks:
+- name: vnodereadinessgaterule.kb.io
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-nodereadiness-io-v1alpha1-nodereadinessgaterule
