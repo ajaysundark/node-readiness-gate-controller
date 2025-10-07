@@ -124,7 +124,36 @@ func (r *RuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{RequeueAfter: time.Minute}, err
 	}
 
+	// Clean up status for deleted nodes
+	if err := r.Controller.cleanupDeletedNodes(ctx, rule); err != nil {
+		log.Error(err, "Failed to clean up deleted nodes", "rule", rule.Name)
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+
 	return ctrl.Result{}, nil
+}
+
+// cleanupDeletedNodes removes status entries for nodes that no longer exist
+func (r *ReadinessGateController) cleanupDeletedNodes(ctx context.Context, rule *readinessv1alpha1.NodeReadinessGateRule) error {
+	nodeList := &corev1.NodeList{}
+	if err := r.List(ctx, nodeList); err != nil {
+		return err
+	}
+
+	existingNodes := make(map[string]bool)
+	for _, node := range nodeList.Items {
+		existingNodes[node.Name] = true
+	}
+
+	var newNodeEvaluations []readinessv1alpha1.NodeEvaluation
+	for _, evaluation := range rule.Status.NodeEvaluations {
+		if existingNodes[evaluation.NodeName] {
+			newNodeEvaluations = append(newNodeEvaluations, evaluation)
+		}
+	}
+
+	rule.Status.NodeEvaluations = newNodeEvaluations
+	return r.Status().Update(ctx, rule)
 }
 
 // processAllNodesForRule processes all nodes when a rule changes
@@ -418,7 +447,7 @@ func (r *RuleReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager)
 		DeleteFunc: func(e event.TypedDeleteEvent[*corev1.Node]) bool {
 			log := ctrl.LoggerFrom(ctx)
 			log.Info("Processing node delete event", "node", e.Object.Name)
-			return false
+			return true
 		},
 	}
 

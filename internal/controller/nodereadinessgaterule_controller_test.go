@@ -576,4 +576,75 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 			}, time.Second*10, time.Millisecond*250).Should(BeTrue())
 		})
 	})
+
+	Context("when a node is deleted", func() {
+		var rule *nodereadinessiov1alpha1.NodeReadinessGateRule
+		var node1, node2 *corev1.Node
+
+		BeforeEach(func() {
+			rule = &nodereadinessiov1alpha1.NodeReadinessGateRule{
+				ObjectMeta: metav1.ObjectMeta{Name: "delete-node-rule"},
+				Spec: nodereadinessiov1alpha1.NodeReadinessGateRuleSpec{
+					Conditions:      []nodereadinessiov1alpha1.ConditionRequirement{{Type: "Ready", RequiredStatus: corev1.ConditionTrue}},
+					Taint:           nodereadinessiov1alpha1.TaintSpec{Key: "unready", Effect: corev1.TaintEffectNoSchedule},
+					EnforcementMode: nodereadinessiov1alpha1.EnforcementModeContinuous,
+				},
+			}
+			node1 = &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}}
+			node2 = &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node2"}}
+
+			Expect(k8sClient.Create(ctx, rule)).To(Succeed())
+			Expect(k8sClient.Create(ctx, node1)).To(Succeed())
+			Expect(k8sClient.Create(ctx, node2)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			Expect(k8sClient.Delete(ctx, rule)).To(Succeed())
+			// node1 is already deleted in the test
+			k8sClient.Delete(ctx, node2)
+		})
+
+		It("should remove the node from the rule's status", func() {
+			// Initial reconcile to populate status
+			_, err := ruleReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: "delete-node-rule"}})
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func() int {
+				updatedRule := &nodereadinessiov1alpha1.NodeReadinessGateRule{}
+				_ = k8sClient.Get(ctx, types.NamespacedName{Name: "delete-node-rule"}, updatedRule)
+				return len(updatedRule.Status.NodeEvaluations)
+			}, time.Second*5).Should(Equal(2))
+
+			// Delete node1
+			Expect(k8sClient.Delete(ctx, node1)).To(Succeed())
+
+			// Reconcile again to trigger cleanup
+			_, err = ruleReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: "delete-node-rule"}})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify node1 is removed from status
+			Eventually(func() bool {
+				updatedRule := &nodereadinessiov1alpha1.NodeReadinessGateRule{}
+				_ = k8sClient.Get(ctx, types.NamespacedName{Name: "delete-node-rule"}, updatedRule)
+				for _, eval := range updatedRule.Status.NodeEvaluations {
+					if eval.NodeName == "node1" {
+						return false
+					}
+				}
+				return true
+			}, time.Second*5).Should(BeTrue())
+
+			// Verify node2 is still in status
+			Eventually(func() bool {
+				updatedRule := &nodereadinessiov1alpha1.NodeReadinessGateRule{}
+				_ = k8sClient.Get(ctx, types.NamespacedName{Name: "delete-node-rule"}, updatedRule)
+				for _, eval := range updatedRule.Status.NodeEvaluations {
+					if eval.NodeName == "node2" {
+						return true
+					}
+				}
+				return false
+			}, time.Second*5).Should(BeTrue())
+		})
+	})
 })
