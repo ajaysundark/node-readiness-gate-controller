@@ -6,7 +6,11 @@ A Kubernetes controller that manages node taints based on multiple readiness gat
 
 The Node Readiness Gates Controller extends Kubernetes' node readiness model by allowing you to define custom readiness rules that evaluate multiple node conditions simultaneously. It automatically manages node taints to prevent scheduling until all specified conditions are satisfied.
 
-Demo here: https://drive.google.com/file/d/14fL7OYJEgUY9qnqSL1Gc_d4rymRRZqHn/view?usp=drive_link
+### Demo
+
+**Node Readiness concept in Kind cluster**
+
+<video src="demo/kind_demo.webm" width="320" height="240" controls></video>
 
 ### Key Features
 
