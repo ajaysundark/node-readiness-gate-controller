@@ -10,7 +10,8 @@ The Node Readiness Gates Controller extends Kubernetes' node readiness model by 
 
 **Node Readiness concept in Kind cluster**
 
-<video src="demo/kind_demo.webm" width="320" height="240" controls></video>
+TODO:(ajaysundark) figure out how to embed video demo!
+https://drive.google.com/file/d/1Q2vCU7FYUrEkHDeQV5NneCH_MNoFshvH/view?usp=sharing
 
 ### Key Features
 
