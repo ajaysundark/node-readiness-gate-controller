@@ -736,4 +736,134 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 			}, time.Second*5).Should(BeTrue())
 		})
 	})
+
+	Context("when a rule's nodeSelector changes", func() {
+		var rule *nodereadinessiov1alpha1.NodeReadinessGateRule
+		var prodNode, devNode *corev1.Node
+
+		BeforeEach(func() {
+			prodNode = &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "prod-node",
+					Labels: map[string]string{"env": "prod"},
+				},
+				Spec: corev1.NodeSpec{
+					Taints: []corev1.Taint{
+						{Key: "selector-change-taint", Effect: corev1.TaintEffectNoSchedule, Value: "pending"},
+					},
+				},
+				Status: corev1.NodeStatus{
+					Conditions: []corev1.NodeCondition{{Type: "TestReady", Status: corev1.ConditionFalse}},
+				},
+			}
+
+			devNode = &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "dev-node",
+					Labels: map[string]string{"env": "dev"},
+				},
+				Status: corev1.NodeStatus{
+					Conditions: []corev1.NodeCondition{{Type: "TestReady", Status: corev1.ConditionFalse}},
+				},
+			}
+
+			rule = &nodereadinessiov1alpha1.NodeReadinessGateRule{
+				ObjectMeta: metav1.ObjectMeta{Name: "selector-change-rule"},
+				Spec: nodereadinessiov1alpha1.NodeReadinessGateRuleSpec{
+					Conditions: []nodereadinessiov1alpha1.ConditionRequirement{
+						{Type: "TestReady", RequiredStatus: corev1.ConditionTrue},
+					},
+					Taint:           nodereadinessiov1alpha1.TaintSpec{Key: "selector-change-taint", Effect: corev1.TaintEffectNoSchedule},
+					EnforcementMode: nodereadinessiov1alpha1.EnforcementModeContinuous,
+					NodeSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"env": "prod"},
+					},
+				},
+			}
+
+			Expect(k8sClient.Create(ctx, prodNode)).To(Succeed())
+			Expect(k8sClient.Create(ctx, devNode)).To(Succeed())
+			Expect(k8sClient.Create(ctx, rule)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			k8sClient.Delete(ctx, prodNode)
+			k8sClient.Delete(ctx, devNode)
+			k8sClient.Delete(ctx, rule)
+		})
+
+		It("should remove taints from nodes that no longer match the selector", func() {
+			// Initial reconcile - prod node should be managed, dev node should not
+			_, err := ruleReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: "selector-change-rule"}})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify prod node still has taint (condition not met)
+			Eventually(func() bool {
+				updatedNode := &corev1.Node{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: "prod-node"}, updatedNode); err != nil {
+					return false
+				}
+				for _, taint := range updatedNode.Spec.Taints {
+					if taint.Key == "selector-change-taint" {
+						return true
+					}
+				}
+				return false
+			}, time.Second*5).Should(BeTrue(), "Prod node should have taint")
+
+			// Verify dev node does not have taint (not selected)
+			Consistently(func() bool {
+				updatedNode := &corev1.Node{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: "dev-node"}, updatedNode); err != nil {
+					return false
+				}
+				for _, taint := range updatedNode.Spec.Taints {
+					if taint.Key == "selector-change-taint" {
+						return false // Taint found (unexpected)
+					}
+				}
+				return true // No taint (expected)
+			}, time.Second*2).Should(BeTrue(), "Dev node should not have taint")
+
+			// Update rule to target dev nodes instead of prod nodes
+			updatedRule := &nodereadinessiov1alpha1.NodeReadinessGateRule{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "selector-change-rule"}, updatedRule)).To(Succeed())
+			updatedRule.Spec.NodeSelector = &metav1.LabelSelector{
+				MatchLabels: map[string]string{"env": "dev"},
+			}
+			Expect(k8sClient.Update(ctx, updatedRule)).To(Succeed())
+
+			// Trigger reconciliation
+			_, err = ruleReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: "selector-change-rule"}})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify taint is removed from prod node (no longer selected)
+			Eventually(func() bool {
+				updatedNode := &corev1.Node{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: "prod-node"}, updatedNode); err != nil {
+					return false
+				}
+				for _, taint := range updatedNode.Spec.Taints {
+					if taint.Key == "selector-change-taint" {
+						return false // Taint still exists
+					}
+				}
+				return true // Taint removed
+			}, time.Second*10).Should(BeTrue(), "Prod node taint should be removed after selector change")
+
+			// Verify dev node now gets taint (newly selected, condition not met)
+			Eventually(func() bool {
+				updatedNode := &corev1.Node{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: "dev-node"}, updatedNode); err != nil {
+					return false
+				}
+				for _, taint := range updatedNode.Spec.Taints {
+					if taint.Key == "selector-change-taint" {
+						return true
+					}
+				}
+				return false
+			}, time.Second*10).Should(BeTrue(), "Dev node should now have taint after selector change")
+		})
+	})
 })

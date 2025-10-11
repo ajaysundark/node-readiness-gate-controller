@@ -142,7 +142,17 @@ func (r *RuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}
 	}
 
-	// Update rule cache
+	// Detect nodeSelector changes and cleanup old nodes
+	cachedRule := r.Controller.getCachedRule(rule.Name)
+	if cachedRule != nil && nodeSelectorChanged(rule.Spec.NodeSelector, cachedRule.Spec.NodeSelector) {
+		log.Info("NodeSelector changed, cleaning up nodes from old selector", "rule", rule.Name)
+		if err := r.Controller.cleanupNodesAfterSelectorChange(ctx, cachedRule, rule); err != nil {
+			log.Error(err, "Failed to cleanup nodes after selector change", "rule", rule.Name)
+			return ctrl.Result{RequeueAfter: time.Minute}, err
+		}
+	}
+
+	// Update rule cache (after cleanup)
 	r.Controller.updateRuleCache(rule)
 
 	if finalizerAdded {
@@ -326,6 +336,18 @@ func (r *ReadinessGateController) updateRuleCache(rule *readinessv1alpha1.NodeRe
 	r.ruleCache[rule.Name] = rule.DeepCopy()
 }
 
+// getCachedRule retrieves a rule from cache
+func (r *ReadinessGateController) getCachedRule(ruleName string) *readinessv1alpha1.NodeReadinessGateRule {
+	r.ruleCacheMutex.RLock()
+	defer r.ruleCacheMutex.RUnlock()
+
+	rule, exists := r.ruleCache[ruleName]
+	if !exists {
+		return nil
+	}
+	return rule.DeepCopy()
+}
+
 // removeRuleFromCache removes a rule from cache
 func (r *ReadinessGateController) removeRuleFromCache(ruleName string) {
 	r.ruleCacheMutex.Lock()
@@ -480,6 +502,122 @@ func (r *ReadinessGateController) cleanupTaintsForRule(ctx context.Context, rule
 	return nil
 }
 
+// cleanupNodesAfterSelectorChange cleans up nodes that matched old selector but not new one
+func (r *ReadinessGateController) cleanupNodesAfterSelectorChange(ctx context.Context, oldRule, newRule *readinessv1alpha1.NodeReadinessGateRule) error {
+	log := ctrl.LoggerFrom(ctx)
+
+	// Get all nodes
+	nodeList := &corev1.NodeList{}
+	if err := r.List(ctx, nodeList); err != nil {
+		return fmt.Errorf("failed to list nodes: %w", err)
+	}
+
+	// Build old selector
+	var oldSelector labels.Selector
+	var err error
+	if oldRule.Spec.NodeSelector != nil {
+		oldSelector, err = metav1.LabelSelectorAsSelector(oldRule.Spec.NodeSelector)
+		if err != nil {
+			return fmt.Errorf("failed to parse old node selector: %w", err)
+		}
+	}
+
+	// Clean up nodes that matched old selector but not new selector
+	var errors []string
+	for _, node := range nodeList.Items {
+		// Check if node matched old selector
+		matchedOld := false
+		if oldSelector == nil {
+			// nil selector matches all nodes
+			matchedOld = true
+		} else {
+			matchedOld = oldSelector.Matches(labels.Set(node.Labels))
+		}
+
+		// Check if node matches new selector (use newRule for current evaluation)
+		matchesNew := r.ruleAppliesTo(newRule, &node)
+
+		// If node matched old but not new, clean up the taint
+		if matchedOld && !matchesNew {
+			if r.hasTaintBySpec(&node, newRule.Spec.Taint) {
+				log.Info("Removing taint from node that no longer matches selector",
+					"node", node.Name,
+					"rule", newRule.Name,
+					"taint", newRule.Spec.Taint.Key)
+
+				if err := r.removeTaintBySpec(ctx, &node, newRule.Spec.Taint); err != nil {
+					errors = append(errors, fmt.Sprintf("node %s: %v", node.Name, err))
+				}
+			}
+		}
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("failed to cleanup taints on some nodes: %s", strings.Join(errors, "; "))
+	}
+
+	return nil
+}
+
+// nodeSelectorChanged checks if nodeSelector has changed
+func nodeSelectorChanged(current, previous *metav1.LabelSelector) bool {
+	// Both nil - no change
+	if current == nil && previous == nil {
+		return false
+	}
+
+	// One is nil, other is not - changed
+	if (current == nil) != (previous == nil) {
+		return true
+	}
+
+	// Compare matchLabels
+	if !stringMapEqual(current.MatchLabels, previous.MatchLabels) {
+		return true
+	}
+
+	// Compare matchExpressions
+	if len(current.MatchExpressions) != len(previous.MatchExpressions) {
+		return true
+	}
+
+	// Create maps for comparison
+	currentExprs := make(map[string]metav1.LabelSelectorRequirement)
+	for _, expr := range current.MatchExpressions {
+		key := fmt.Sprintf("%s-%s-%v", expr.Key, expr.Operator, expr.Values)
+		currentExprs[key] = expr
+	}
+
+	previousExprs := make(map[string]metav1.LabelSelectorRequirement)
+	for _, expr := range previous.MatchExpressions {
+		key := fmt.Sprintf("%s-%s-%v", expr.Key, expr.Operator, expr.Values)
+		previousExprs[key] = expr
+	}
+
+	for key := range currentExprs {
+		if _, exists := previousExprs[key]; !exists {
+			return true
+		}
+	}
+
+	return false
+}
+
+// stringMapEqual checks if two string maps are equal
+func stringMapEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+
+	return true
+}
+
 // containsFinalizer checks if a finalizer exists in the rule
 func containsFinalizer(rule *readinessv1alpha1.NodeReadinessGateRule, finalizer string) bool {
 	for _, f := range rule.Finalizers {
@@ -518,8 +656,7 @@ func (r *RuleReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager)
 		return err
 	}
 
-	// Watch for changes to the primary resource NodeReadinessGateRule.
-	// TODO(ajaysundark): Add predicates to filter events and optimize handling
+	// Watch for changes to the primary resource NodeReadinessGateRule
 	err = c.Watch(source.Kind(mgr.GetCache(), &readinessv1alpha1.NodeReadinessGateRule{},
 		&handler.TypedEnqueueRequestForObject[*readinessv1alpha1.NodeReadinessGateRule]{}))
 	if err != nil {
