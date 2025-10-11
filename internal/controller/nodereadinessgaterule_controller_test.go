@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	nodereadinessiov1alpha1 "github.com/ajaysundark/node-readiness-gate-controller/api/v1alpha1"
@@ -574,6 +575,94 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 				}
 				return false
 			}, time.Second*10, time.Millisecond*250).Should(BeTrue())
+		})
+	})
+
+	Context("when a rule is deleted", func() {
+		var rule *nodereadinessiov1alpha1.NodeReadinessGateRule
+		var testNode *corev1.Node
+
+		BeforeEach(func() {
+			testNode = &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "cleanup-test-node"},
+				Spec: corev1.NodeSpec{
+					Taints: []corev1.Taint{
+						{Key: "cleanup-taint", Effect: corev1.TaintEffectNoSchedule, Value: "pending"},
+					},
+				},
+				Status: corev1.NodeStatus{
+					Conditions: []corev1.NodeCondition{{Type: "TestReady", Status: corev1.ConditionFalse}},
+				},
+			}
+			rule = &nodereadinessiov1alpha1.NodeReadinessGateRule{
+				ObjectMeta: metav1.ObjectMeta{Name: "cleanup-rule"},
+				Spec: nodereadinessiov1alpha1.NodeReadinessGateRuleSpec{
+					Conditions:      []nodereadinessiov1alpha1.ConditionRequirement{{Type: "TestReady", RequiredStatus: corev1.ConditionTrue}},
+					Taint:           nodereadinessiov1alpha1.TaintSpec{Key: "cleanup-taint", Effect: corev1.TaintEffectNoSchedule},
+					EnforcementMode: nodereadinessiov1alpha1.EnforcementModeContinuous,
+				},
+			}
+
+			Expect(k8sClient.Create(ctx, testNode)).To(Succeed())
+			Expect(k8sClient.Create(ctx, rule)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			k8sClient.Delete(ctx, testNode)
+			k8sClient.Delete(ctx, rule)
+		})
+
+		It("should remove taints from nodes when rule is deleted", func() {
+			// Initial reconcile to add finalizer
+			_, err := ruleReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: "cleanup-rule"}})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify finalizer was added
+			Eventually(func() []string {
+				updatedRule := &nodereadinessiov1alpha1.NodeReadinessGateRule{}
+				_ = k8sClient.Get(ctx, types.NamespacedName{Name: "cleanup-rule"}, updatedRule)
+				return updatedRule.Finalizers
+			}, time.Second*5).Should(ContainElement("nodereadiness.io/cleanup-taints"))
+
+			// Verify node still has taint
+			updatedNode := &corev1.Node{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "cleanup-test-node"}, updatedNode)).To(Succeed())
+			hasTaint := false
+			for _, taint := range updatedNode.Spec.Taints {
+				if taint.Key == "cleanup-taint" {
+					hasTaint = true
+					break
+				}
+			}
+			Expect(hasTaint).To(BeTrue(), "Node should have taint before rule deletion")
+
+			// Delete the rule
+			Expect(k8sClient.Delete(ctx, rule)).To(Succeed())
+
+			// Trigger reconciliation to process deletion
+			_, err = ruleReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: "cleanup-rule"}})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify taint is removed from node
+			Eventually(func() bool {
+				updatedNode := &corev1.Node{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: "cleanup-test-node"}, updatedNode); err != nil {
+					return false
+				}
+				for _, taint := range updatedNode.Spec.Taints {
+					if taint.Key == "cleanup-taint" {
+						return false // Taint still exists
+					}
+				}
+				return true // Taint removed
+			}, time.Second*10).Should(BeTrue(), "Taint should be removed after rule deletion")
+
+			// Verify rule is actually deleted (finalizer removed)
+			Eventually(func() bool {
+				deletedRule := &nodereadinessiov1alpha1.NodeReadinessGateRule{}
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: "cleanup-rule"}, deletedRule)
+				return err != nil && client.IgnoreNotFound(err) == nil
+			}, time.Second*10).Should(BeTrue(), "Rule should be fully deleted")
 		})
 	})
 

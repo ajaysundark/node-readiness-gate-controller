@@ -44,6 +44,11 @@ import (
 	readinessv1alpha1 "github.com/ajaysundark/node-readiness-gate-controller/api/v1alpha1"
 )
 
+const (
+	// finalizerName is the finalizer added to NodeReadinessGateRule to ensure cleanup
+	finalizerName = "nodereadiness.io/cleanup-taints"
+)
+
 // ReadinessGateController manages node taints based on readiness gate rules
 type ReadinessGateController struct {
 	client.Client
@@ -91,15 +96,58 @@ func (r *RuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	rule := &readinessv1alpha1.NodeReadinessGateRule{}
 	if err := r.Get(ctx, req.NamespacedName, rule); err != nil {
 		if client.IgnoreNotFound(err) == nil {
-			// Rule deleted, remove from cache and clean up
+			// Rule deleted, remove from cache
 			r.Controller.removeRuleFromCache(req.Name)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
 	}
 
+	// Handle deletion with finalizer
+	if rule.DeletionTimestamp != nil {
+		if containsFinalizer(rule, finalizerName) {
+			// Rule is being deleted, clean up taints before removing finalizer
+			log.Info("Cleaning up taints for deleted rule", "rule", rule.Name)
+			if err := r.Controller.cleanupTaintsForRule(ctx, rule); err != nil {
+				log.Error(err, "Failed to cleanup taints for rule", "rule", rule.Name)
+				return ctrl.Result{RequeueAfter: time.Minute}, err
+			}
+
+			// Remove finalizer
+			removeFinalizer(rule, finalizerName)
+			if err := r.Update(ctx, rule); err != nil {
+				log.Error(err, "Failed to remove finalizer", "rule", rule.Name)
+				return ctrl.Result{}, err
+			}
+
+			// Remove from cache after successful cleanup
+			r.Controller.removeRuleFromCache(rule.Name)
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Add finalizer if not present
+	finalizerAdded := false
+	if !containsFinalizer(rule, finalizerName) {
+		addFinalizer(rule, finalizerName)
+		if err := r.Update(ctx, rule); err != nil {
+			log.Error(err, "Failed to add finalizer", "rule", rule.Name)
+			return ctrl.Result{}, err
+		}
+		finalizerAdded = true
+
+		// Refresh rule after update to get latest version
+		if err := r.Get(ctx, req.NamespacedName, rule); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	// Update rule cache
 	r.Controller.updateRuleCache(rule)
+
+	if finalizerAdded {
+		log.V(4).Info("Finalizer added to rule", "rule", rule.Name)
+	}
 
 	// Handle dry run
 	if rule.Spec.DryRun {
@@ -394,6 +442,70 @@ func (r *ReadinessGateController) processDryRun(ctx context.Context, rule *readi
 // SetGlobalDryRun sets the global dry run mode (emergency off-switch)
 func (r *ReadinessGateController) SetGlobalDryRun(dryRun bool) {
 	r.globalDryRun = dryRun
+}
+
+// cleanupTaintsForRule removes taints managed by this rule from all applicable nodes
+func (r *ReadinessGateController) cleanupTaintsForRule(ctx context.Context, rule *readinessv1alpha1.NodeReadinessGateRule) error {
+	log := ctrl.LoggerFrom(ctx)
+
+	// Get all nodes that this rule applies to
+	nodeList := &corev1.NodeList{}
+	if err := r.List(ctx, nodeList); err != nil {
+		return fmt.Errorf("failed to list nodes: %w", err)
+	}
+
+	var errors []string
+	for _, node := range nodeList.Items {
+		if !r.ruleAppliesTo(rule, &node) {
+			continue
+		}
+
+		// Check if node has the taint managed by this rule
+		if r.hasTaintBySpec(&node, rule.Spec.Taint) {
+			log.Info("Removing taint from node during rule cleanup",
+				"node", node.Name,
+				"rule", rule.Name,
+				"taint", rule.Spec.Taint.Key)
+
+			if err := r.removeTaintBySpec(ctx, &node, rule.Spec.Taint); err != nil {
+				errors = append(errors, fmt.Sprintf("node %s: %v", node.Name, err))
+			}
+		}
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("failed to cleanup taints on some nodes: %s", strings.Join(errors, "; "))
+	}
+
+	return nil
+}
+
+// containsFinalizer checks if a finalizer exists in the rule
+func containsFinalizer(rule *readinessv1alpha1.NodeReadinessGateRule, finalizer string) bool {
+	for _, f := range rule.Finalizers {
+		if f == finalizer {
+			return true
+		}
+	}
+	return false
+}
+
+// addFinalizer adds a finalizer to the rule
+func addFinalizer(rule *readinessv1alpha1.NodeReadinessGateRule, finalizer string) {
+	if !containsFinalizer(rule, finalizer) {
+		rule.Finalizers = append(rule.Finalizers, finalizer)
+	}
+}
+
+// removeFinalizer removes a finalizer from the rule
+func removeFinalizer(rule *readinessv1alpha1.NodeReadinessGateRule, finalizer string) {
+	var newFinalizers []string
+	for _, f := range rule.Finalizers {
+		if f != finalizer {
+			newFinalizers = append(newFinalizers, f)
+		}
+	}
+	rule.Finalizers = newFinalizers
 }
 
 // SetupWithManager sets up the controller with the Manager.
