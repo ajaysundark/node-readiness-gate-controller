@@ -117,6 +117,63 @@ var _ = Describe("Node Controller", func() {
 		readinessController.removeRuleFromCache(ruleName)
 	})
 
+	Context("Helper function tests", func() {
+		It("should correctly compare node conditions", func() {
+			cond1 := []corev1.NodeCondition{
+				{Type: "Ready", Status: corev1.ConditionTrue},
+				{Type: "NetworkReady", Status: corev1.ConditionFalse},
+			}
+			cond2 := []corev1.NodeCondition{
+				{Type: "Ready", Status: corev1.ConditionTrue},
+				{Type: "NetworkReady", Status: corev1.ConditionFalse},
+			}
+			cond3 := []corev1.NodeCondition{
+				{Type: "Ready", Status: corev1.ConditionFalse},
+				{Type: "NetworkReady", Status: corev1.ConditionFalse},
+			}
+			cond4 := []corev1.NodeCondition{
+				{Type: "Ready", Status: corev1.ConditionTrue},
+			}
+
+			Expect(conditionsEqual(cond1, cond2)).To(BeTrue(), "identical conditions should be equal")
+			Expect(conditionsEqual(cond1, cond3)).To(BeFalse(), "different status should not be equal")
+			Expect(conditionsEqual(cond1, cond4)).To(BeFalse(), "different length should not be equal")
+		})
+
+		It("should correctly compare node taints", func() {
+			taint1 := []corev1.Taint{
+				{Key: "key1", Effect: corev1.TaintEffectNoSchedule, Value: "value1"},
+				{Key: "key2", Effect: corev1.TaintEffectNoExecute, Value: "value2"},
+			}
+			taint2 := []corev1.Taint{
+				{Key: "key1", Effect: corev1.TaintEffectNoSchedule, Value: "value1"},
+				{Key: "key2", Effect: corev1.TaintEffectNoExecute, Value: "value2"},
+			}
+			taint3 := []corev1.Taint{
+				{Key: "key1", Effect: corev1.TaintEffectNoSchedule, Value: "different"},
+				{Key: "key2", Effect: corev1.TaintEffectNoExecute, Value: "value2"},
+			}
+			taint4 := []corev1.Taint{
+				{Key: "key1", Effect: corev1.TaintEffectNoSchedule, Value: "value1"},
+			}
+
+			Expect(taintsEqual(taint1, taint2)).To(BeTrue(), "identical taints should be equal")
+			Expect(taintsEqual(taint1, taint3)).To(BeFalse(), "different value should not be equal")
+			Expect(taintsEqual(taint1, taint4)).To(BeFalse(), "different length should not be equal")
+		})
+
+		It("should correctly compare node labels", func() {
+			labels1 := map[string]string{"env": "prod", "app": "web"}
+			labels2 := map[string]string{"env": "prod", "app": "web"}
+			labels3 := map[string]string{"env": "dev", "app": "web"}
+			labels4 := map[string]string{"env": "prod"}
+
+			Expect(labelsEqual(labels1, labels2)).To(BeTrue(), "identical labels should be equal")
+			Expect(labelsEqual(labels1, labels3)).To(BeFalse(), "different value should not be equal")
+			Expect(labelsEqual(labels1, labels4)).To(BeFalse(), "different length should not be equal")
+		})
+	})
+
 	Context("when reconciling a node", func() {
 		When("in bootstrap-only mode", func() {
 			BeforeEach(func() {

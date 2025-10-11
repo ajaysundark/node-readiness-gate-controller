@@ -246,14 +246,90 @@ func (r *NodeReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager)
 			predicate.TypedFuncs[*corev1.Node]{
 				CreateFunc: func(e event.TypedCreateEvent[*corev1.Node]) bool {
 					log := ctrl.LoggerFrom(ctx)
-					log.Info("NodeReconciler processing node create event", "node", e.Object.Name)
+					log.V(4).Info("NodeReconciler processing node create event", "node", e.Object.Name)
 					return true
 				},
 				UpdateFunc: func(e event.TypedUpdateEvent[*corev1.Node]) bool {
 					log := ctrl.LoggerFrom(ctx)
-					log.Info("NodeReconciler processing node update event", "node", e.ObjectNew.Name)
-					// Reconcile if the resource version has changed.
-					return e.ObjectOld.GetResourceVersion() != e.ObjectNew.GetResourceVersion()
+					oldNode := e.ObjectOld
+					newNode := e.ObjectNew
+
+					// Only reconcile if conditions or taints changed
+					conditionsChanged := !conditionsEqual(oldNode.Status.Conditions, newNode.Status.Conditions)
+					taintsChanged := !taintsEqual(oldNode.Spec.Taints, newNode.Spec.Taints)
+					labelsChanged := !labelsEqual(oldNode.Labels, newNode.Labels)
+
+					shouldReconcile := conditionsChanged || taintsChanged || labelsChanged
+
+					if shouldReconcile {
+						log.V(4).Info("NodeReconciler processing node update event",
+							"node", newNode.Name,
+							"conditionsChanged", conditionsChanged,
+							"taintsChanged", taintsChanged,
+							"labelsChanged", labelsChanged)
+					}
+
+					return shouldReconcile
 				},
 			}))
+}
+
+// conditionsEqual checks if two condition slices are equal
+func conditionsEqual(a, b []corev1.NodeCondition) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	// Create map for quick lookup
+	aMap := make(map[corev1.NodeConditionType]corev1.ConditionStatus)
+	for _, cond := range a {
+		aMap[cond.Type] = cond.Status
+	}
+
+	for _, cond := range b {
+		if status, exists := aMap[cond.Type]; !exists || status != cond.Status {
+			return false
+		}
+	}
+
+	return true
+}
+
+// taintsEqual checks if two taint slices are equal
+func taintsEqual(a, b []corev1.Taint) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	// Create map for quick lookup
+	aMap := make(map[string]corev1.Taint)
+	for _, taint := range a {
+		key := taint.Key + string(taint.Effect)
+		aMap[key] = taint
+	}
+
+	for _, taint := range b {
+		key := taint.Key + string(taint.Effect)
+		oldTaint, exists := aMap[key]
+		if !exists || oldTaint.Value != taint.Value {
+			return false
+		}
+	}
+
+	return true
+}
+
+// labelsEqual checks if two label maps are equal
+func labelsEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+
+	return true
 }
