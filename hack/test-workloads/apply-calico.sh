@@ -4,18 +4,19 @@ set -e
 
 KUBECTL_ARGS="$@"
 
-YQ_VERSION="v4.44.1"
+YQ_VERSION="v4.48.1"
 YQ_PATH="/tmp/yq"
 
 # Check if yq is installed, if not download it.
 if [ ! -f "$YQ_PATH" ]; then
     echo "yq not found at $YQ_PATH, downloading..."
+    OS=$(uname -s | tr '[:upper:]' '[:lower:]')
     ARCH=$(uname -m)
     case $ARCH in
         x86_64)
             ARCH="amd64"
             ;;
-        aarch64)
+        aarch64|arm64)
             ARCH="arm64"
             ;;
         *)
@@ -23,7 +24,7 @@ if [ ! -f "$YQ_PATH" ]; then
             exit 1
             ;;
     esac
-    YQ_BINARY="yq_linux_${ARCH}"
+    YQ_BINARY="yq_${OS}_${ARCH}"
     curl -sL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${YQ_BINARY}" -o "$YQ_PATH"
     chmod +x "$YQ_PATH"
 fi
