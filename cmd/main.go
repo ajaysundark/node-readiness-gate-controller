@@ -71,7 +71,7 @@ func main() {
 
 	opts := zap.Options{
 		Development:     true,
-		StacktraceLevel: zapcore.InfoLevel,
+		StacktraceLevel: zapcore.PanicLevel,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()

@@ -108,7 +108,7 @@ var _ = Describe("Node Controller", func() {
 		Expect(k8sClient.Create(ctx, rule)).To(Succeed())
 
 		// Manually add rule to cache to simulate RuleReconciler
-		readinessController.updateRuleCache(rule)
+		readinessController.updateRuleCache(ctx, rule)
 	})
 
 	AfterEach(func() {
@@ -123,7 +123,7 @@ var _ = Describe("Node Controller", func() {
 		}
 		k8sClient.Delete(ctx, rule)
 
-		readinessController.removeRuleFromCache(ruleName)
+		readinessController.removeRuleFromCache(ctx, ruleName)
 	})
 
 	Context("Helper function tests", func() {

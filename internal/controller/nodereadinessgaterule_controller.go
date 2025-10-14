@@ -31,7 +31,6 @@ import (
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
-	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -88,13 +87,15 @@ type RuleReconciler struct {
 
 func (r *RuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
+	log.Info("Reconciling rule", "rule", req.Name)
 
 	// Fetch the rule
 	rule := &readinessv1alpha1.NodeReadinessGateRule{}
 	if err := r.Get(ctx, req.NamespacedName, rule); err != nil {
 		if client.IgnoreNotFound(err) == nil {
 			// Rule deleted, remove from cache
-			r.Controller.removeRuleFromCache(req.Name)
+			log.Info("Rule not found, removing from cache", "rule", req.Name)
+			r.Controller.removeRuleFromCache(ctx, req.Name)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
@@ -118,7 +119,7 @@ func (r *RuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			}
 
 			// Remove from cache after successful cleanup
-			r.Controller.removeRuleFromCache(rule.Name)
+			r.Controller.removeRuleFromCache(ctx, rule.Name)
 		}
 		return ctrl.Result{}, nil
 	}
@@ -150,7 +151,7 @@ func (r *RuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 
 	// Update rule cache (after cleanup)
-	r.Controller.updateRuleCache(rule)
+	r.Controller.updateRuleCache(ctx, rule)
 
 	if finalizerAdded {
 		log.V(4).Info("Finalizer added to rule", "rule", rule.Name)
@@ -213,20 +214,29 @@ func (r *ReadinessGateController) cleanupDeletedNodes(ctx context.Context, rule 
 
 // processAllNodesForRule processes all nodes when a rule changes
 func (r *ReadinessGateController) processAllNodesForRule(ctx context.Context, rule *readinessv1alpha1.NodeReadinessGateRule) error {
+	log := ctrl.LoggerFrom(ctx)
+
 	nodeList := &corev1.NodeList{}
 	if err := r.List(ctx, nodeList); err != nil {
 		return err
 	}
 
+	log.Info("Processing all nodes for rule", "rule", rule.Name, "totalNodes", len(nodeList.Items))
+
+	processedCount := 0
 	for _, node := range nodeList.Items {
-		if r.ruleAppliesTo(rule, &node) {
+		if r.ruleAppliesTo(ctx, rule, &node) {
+			processedCount++
+			log.Info("Processing node for rule", "rule", rule.Name, "node", node.Name)
 			if err := r.evaluateRuleForNode(ctx, rule, &node); err != nil {
 				// Log error but continue with other nodes
+				log.Error(err, "Failed to evaluate node for rule", "rule", rule.Name, "node", node.Name)
 				r.recordNodeFailure(rule, node.Name, "EvaluationError", err.Error())
 			}
 		}
 	}
 
+	log.Info("Completed processing nodes for rule", "rule", rule.Name, "processedCount", processedCount)
 	return nil
 }
 
@@ -254,11 +264,18 @@ func (r *ReadinessGateController) evaluateRuleForNode(ctx context.Context, rule 
 			Satisfied:      satisfied,
 			Missing:        missing,
 		})
+
+		log.V(1).Info("Condition evaluation", "node", node.Name, "rule", rule.Name,
+			"conditionType", condReq.Type, "current", currentStatus, "required", condReq.RequiredStatus,
+			"satisfied", satisfied, "missing", missing)
 	}
 
 	// Determine taint action
 	shouldRemoveTaint := allConditionsSatisfied
 	currentlyHasTaint := r.hasTaintBySpec(node, rule.Spec.Taint)
+
+	log.Info("Evaluation result", "node", node.Name, "rule", rule.Name,
+		"allConditionsSatisfied", allConditionsSatisfied, "hasTaint", currentlyHasTaint)
 
 	var action string
 	var err error
@@ -285,7 +302,8 @@ func (r *ReadinessGateController) evaluateRuleForNode(ctx context.Context, rule 
 		}
 	} else {
 		action = "none"
-		log.V(4).Info("No taint action needed", "node", node.Name, "rule", rule.Name)
+		log.Info("No taint action needed", "node", node.Name, "rule", rule.Name,
+			"shouldRemove", shouldRemoveTaint, "hasTaint", currentlyHasTaint)
 	}
 
 	// Update evaluation status
@@ -295,14 +313,14 @@ func (r *ReadinessGateController) evaluateRuleForNode(ctx context.Context, rule 
 }
 
 // getApplicableRulesForNode returns all rules applicable to a node
-func (r *ReadinessGateController) getApplicableRulesForNode(node *corev1.Node) []*readinessv1alpha1.NodeReadinessGateRule {
+func (r *ReadinessGateController) getApplicableRulesForNode(ctx context.Context, node *corev1.Node) []*readinessv1alpha1.NodeReadinessGateRule {
 	r.ruleCacheMutex.RLock()
 	defer r.ruleCacheMutex.RUnlock()
 
 	var applicableRules []*readinessv1alpha1.NodeReadinessGateRule
 
 	for _, rule := range r.ruleCache {
-		if r.ruleAppliesTo(rule, node) {
+		if r.ruleAppliesTo(ctx, rule, node) {
 			applicableRules = append(applicableRules, rule)
 		}
 	}
@@ -311,14 +329,16 @@ func (r *ReadinessGateController) getApplicableRulesForNode(node *corev1.Node) [
 }
 
 // ruleAppliesTo checks if a rule applies to a node
-func (r *ReadinessGateController) ruleAppliesTo(rule *readinessv1alpha1.NodeReadinessGateRule, node *corev1.Node) bool {
+func (r *ReadinessGateController) ruleAppliesTo(ctx context.Context, rule *readinessv1alpha1.NodeReadinessGateRule, node *corev1.Node) bool {
+	log := ctrl.LoggerFrom(ctx)
+
 	if rule.Spec.NodeSelector == nil {
 		return true
 	}
 
 	selector, err := metav1.LabelSelectorAsSelector(rule.Spec.NodeSelector)
 	if err != nil {
-		klog.Errorf("Invalid node selector for rule %s: %v", rule.Name, err)
+		log.Error(err, "Invalid node selector for rule", "rule", rule.Name)
 		return false
 	}
 
@@ -326,11 +346,13 @@ func (r *ReadinessGateController) ruleAppliesTo(rule *readinessv1alpha1.NodeRead
 }
 
 // updateRuleCache updates the rule cache
-func (r *ReadinessGateController) updateRuleCache(rule *readinessv1alpha1.NodeReadinessGateRule) {
+func (r *ReadinessGateController) updateRuleCache(ctx context.Context, rule *readinessv1alpha1.NodeReadinessGateRule) {
+	log := ctrl.LoggerFrom(ctx)
 	r.ruleCacheMutex.Lock()
 	defer r.ruleCacheMutex.Unlock()
 
 	r.ruleCache[rule.Name] = rule.DeepCopy()
+	log.Info("Added rule to cache", "rule", rule.Name, "totalRules", len(r.ruleCache))
 }
 
 // getCachedRule retrieves a rule from cache
@@ -346,11 +368,13 @@ func (r *ReadinessGateController) getCachedRule(ruleName string) *readinessv1alp
 }
 
 // removeRuleFromCache removes a rule from cache
-func (r *ReadinessGateController) removeRuleFromCache(ruleName string) {
+func (r *ReadinessGateController) removeRuleFromCache(ctx context.Context, ruleName string) {
+	log := ctrl.LoggerFrom(ctx)
 	r.ruleCacheMutex.Lock()
 	defer r.ruleCacheMutex.Unlock()
 
 	delete(r.ruleCache, ruleName)
+	log.Info("Removed rule from cache", "rule", ruleName, "totalRules", len(r.ruleCache))
 }
 
 // updateRuleStatus updates the status of a NodeReadinessGateRule
@@ -365,7 +389,7 @@ func (r *ReadinessGateController) updateRuleStatus(ctx context.Context, rule *re
 	var completedNodes []string
 
 	for _, node := range nodeList.Items {
-		if r.ruleAppliesTo(rule, &node) {
+		if r.ruleAppliesTo(ctx, rule, &node) {
 			appliedNodes = append(appliedNodes, node.Name)
 
 			// Check if bootstrap completed for bootstrap-only rules
@@ -396,7 +420,7 @@ func (r *ReadinessGateController) processDryRun(ctx context.Context, rule *readi
 	var summaryParts []string
 
 	for _, node := range nodeList.Items {
-		if !r.ruleAppliesTo(rule, &node) {
+		if !r.ruleAppliesTo(ctx, rule, &node) {
 			continue
 		}
 
@@ -475,7 +499,7 @@ func (r *ReadinessGateController) cleanupTaintsForRule(ctx context.Context, rule
 
 	var errors []string
 	for _, node := range nodeList.Items {
-		if !r.ruleAppliesTo(rule, &node) {
+		if !r.ruleAppliesTo(ctx, rule, &node) {
 			continue
 		}
 
@@ -532,7 +556,7 @@ func (r *ReadinessGateController) cleanupNodesAfterSelectorChange(ctx context.Co
 		}
 
 		// Check if node matches new selector (use newRule for current evaluation)
-		matchesNew := r.ruleAppliesTo(newRule, &node)
+		matchesNew := r.ruleAppliesTo(ctx, newRule, &node)
 
 		// If node matched old but not new, clean up the taint
 		if matchedOld && !matchesNew {

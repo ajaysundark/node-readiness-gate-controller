@@ -24,7 +24,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -50,6 +49,7 @@ type NodeReconciler struct {
 
 func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
+	log.Info("Reconciling node", "node", req.Name)
 
 	// Fetch the node
 	node := &corev1.Node{}
@@ -71,23 +71,25 @@ func (r *ReadinessGateController) processNodeAgainstAllRules(ctx context.Context
 	log := ctrl.LoggerFrom(ctx)
 
 	// Get all applicable rules for this node
-	applicableRules := r.getApplicableRulesForNode(node)
+	applicableRules := r.getApplicableRulesForNode(ctx, node)
+	log.Info("Processing node against rules", "node", node.Name, "ruleCount", len(applicableRules))
 
 	for _, rule := range applicableRules {
 		// Skip if bootstrap-only and already completed
 		if r.isBootstrapCompleted(node.Name, rule.Name) && rule.Spec.EnforcementMode == readinessv1alpha1.EnforcementModeBootstrapOnly {
-			log.V(4).Info("Skipping bootstrap-only rule - already completed",
+			log.Info("Skipping bootstrap-only rule - already completed",
 				"node", node.Name, "rule", rule.Name)
 			continue
 		}
 
 		// Skip if dry run or global dry run
 		if rule.Spec.DryRun || r.globalDryRun {
-			log.V(4).Info("Skipping rule - dry run mode",
+			log.Info("Skipping rule - dry run mode",
 				"node", node.Name, "rule", rule.Name)
 			continue
 		}
 
+		log.Info("Evaluating rule for node", "node", node.Name, "rule", rule.Name)
 		if err := r.evaluateRuleForNode(ctx, rule, node); err != nil {
 			log.Error(err, "Failed to evaluate rule for node",
 				"node", node.Name, "rule", rule.Name)
@@ -157,9 +159,11 @@ func (r *ReadinessGateController) isBootstrapCompleted(nodeName, ruleName string
 }
 
 func (r *ReadinessGateController) markBootstrapCompleted(ctx context.Context, nodeName, ruleName string) {
+	log := ctrl.LoggerFrom(ctx)
+
 	node := &corev1.Node{}
 	if err := r.Get(ctx, client.ObjectKey{Name: nodeName}, node); err != nil {
-		klog.Errorf("Failed to get node %s for bootstrap completion: %v", nodeName, err)
+		log.Error(err, "Failed to get node for bootstrap completion", "node", nodeName)
 		return
 	}
 
@@ -173,7 +177,9 @@ func (r *ReadinessGateController) markBootstrapCompleted(ctx context.Context, no
 	node.Annotations[annotationKey] = "true"
 
 	if err := r.Update(ctx, node); err != nil {
-		klog.Errorf("Failed to mark bootstrap completed for node %s rule %s: %v", nodeName, ruleName, err)
+		log.Error(err, "Failed to mark bootstrap completed", "node", nodeName, "rule", ruleName)
+	} else {
+		log.Info("Marked bootstrap completed", "node", nodeName, "rule", ruleName)
 	}
 }
 

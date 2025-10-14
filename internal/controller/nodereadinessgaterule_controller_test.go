@@ -319,7 +319,7 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 			defer k8sClient.Delete(ctx, rule)
 
 			// First add rule to cache
-			readinessController.updateRuleCache(rule)
+			readinessController.updateRuleCache(ctx, rule)
 
 			// Process node
 			_, err := nodeReconciler.Reconcile(ctx, reconcile.Request{
@@ -401,7 +401,7 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 				},
 			}
 
-			applies := readinessController.ruleAppliesTo(rule, matchingNode)
+			applies := readinessController.ruleAppliesTo(ctx, rule, matchingNode)
 			Expect(applies).To(BeTrue())
 
 			// Node that doesn't match
@@ -413,7 +413,7 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 				},
 			}
 
-			applies = readinessController.ruleAppliesTo(rule, nonMatchingNode)
+			applies = readinessController.ruleAppliesTo(ctx, rule, nonMatchingNode)
 			Expect(applies).To(BeFalse())
 
 			// Rule without selector should apply to all nodes
@@ -421,7 +421,7 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 				Spec: nodereadinessiov1alpha1.NodeReadinessGateRuleSpec{},
 			}
 
-			applies = readinessController.ruleAppliesTo(ruleWithoutSelector, nonMatchingNode)
+			applies = readinessController.ruleAppliesTo(ctx, ruleWithoutSelector, nonMatchingNode)
 			Expect(applies).To(BeTrue())
 		})
 
@@ -543,7 +543,7 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 			Expect(k8sClient.Create(ctx, newNode)).To(Succeed())
 
 			// Add the rule to the cache
-			readinessController.updateRuleCache(rule)
+			readinessController.updateRuleCache(ctx, rule)
 
 			// Manually trigger rule reconciliation to simulate watch behavior
 			_, err := ruleReconciler.Reconcile(ctx, reconcile.Request{
