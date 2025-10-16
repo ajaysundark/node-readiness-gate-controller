@@ -11,12 +11,12 @@ metadata:
   labels:
     app.kubernetes.io/name: nrgcontroller
     app.kubernetes.io/managed-by: kustomize
-  name: nodereadinessgaterule-editor-role
+  name: nodereadinessrule-editor-role
 rules:
 - apiGroups:
   - nodereadiness.io
   resources:
-  - nodereadinessgaterules
+  - nodereadinessrules
   verbs:
   - create
   - delete
@@ -28,6 +28,6 @@ rules:
 - apiGroups:
   - nodereadiness.io
   resources:
-  - nodereadinessgaterules/status
+  - nodereadinessrules/status
   verbs:
   - get

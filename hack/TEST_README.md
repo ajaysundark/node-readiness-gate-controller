@@ -58,21 +58,21 @@ Verify the controller is running on the platform node (`nrg-test-worker`):
 kubectl get pods -n nrgcontroller-system -o wide
 ```
 
-### Step 4: Deploy the Readiness Rule
-
-Apply the network readiness rule. This will be validated by the webhook.
-
-```bash
-kubectl apply -f examples/network-readiness-rule.yaml
-```
-
-### Step 6: Verify Initial State
+### Step 4: Verify Initial State
 
 Check that the application worker node (`nrg-test-worker2`) has the `NetworkReady` taint.
 
 ```bash
 # The output should include 'readiness.k8s.io/NetworkReady'
 kubectl get node nrg-test-worker2 -o jsonpath='Taints:{"\n"}{range .spec.taints[*]}{.key}{"\n"}{end}'
+```
+
+### Step 5: Deploy the Readiness Rule
+
+Apply the network readiness rule. This will be validated by the webhook.
+
+```bash
+kubectl apply -f examples/network-readiness-rule.yaml
 ```
 
 ### Step 7: Deploy Calico CNI with Readiness Reporter

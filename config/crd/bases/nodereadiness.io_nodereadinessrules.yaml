@@ -4,21 +4,22 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
-  name: nodereadinessgaterules.nodereadiness.io
+  name: nodereadinessrules.nodereadiness.io
 spec:
   group: nodereadiness.io
   names:
-    kind: NodeReadinessGateRule
-    listKind: NodeReadinessGateRuleList
-    plural: nodereadinessgaterules
-    singular: nodereadinessgaterule
+    kind: NodeReadinessRule
+    listKind: NodeReadinessRuleList
+    plural: nodereadinessrules
+    shortNames:
+    - nrr
+    singular: nodereadinessrule
   scope: Cluster
   versions:
   - name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: NodeReadinessGateRule is the Schema for the nodereadinessgaterules
-          API
+        description: NodeReadinessRule is the Schema for the nodereadinessrules API
         properties:
           apiVersion:
             description: |-
@@ -38,16 +39,21 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of NodeReadinessGateRule
+            description: spec defines the desired state of NodeReadinessRule
             properties:
               conditions:
-                description: Replace single ConditionType with multiple conditions
+                description: Conditions specifies a list of node conditions that must
+                  be satisfied for this rule to be applied
                 items:
-                  description: New types to add
+                  description: ConditionRequirement specifies a required node condition
+                    and its expected status
                   properties:
                     requiredStatus:
+                      description: RequiredStatus is the expected status of the condition
+                        (True, False, or Unknown)
                       type: string
                     type:
+                      description: Type is the name of the node condition to check
                       type: string
                   required:
                   - requiredStatus
@@ -55,15 +61,20 @@ spec:
                   type: object
                 type: array
               dryRun:
-                description: Add dry run support
+                description: DryRun if true, shows what would happen without actually
+                  applying taints
                 type: boolean
               enforcementMode:
-                description: Add enforcement mode
+                description: 'EnforcementMode determines how the rule is enforced:
+                  either once during node bootstrap or continuously'
                 type: string
               gracePeriod:
+                description: GracePeriod specifies how long to wait before applying
+                  the taint after conditions are not met
                 type: string
               nodeSelector:
-                description: Keep existing fields
+                description: NodeSelector is a label selector to filter which nodes
+                  this rule applies to
                 properties:
                   matchExpressions:
                     description: matchExpressions is a list of label selector requirements.
@@ -109,14 +120,18 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
               taint:
-                description: Simplify taint specification (remove TaintKey, TaintEffect
-                  separation)
+                description: Taint specifies the taint to be applied to nodes that
+                  do not satisfy the conditions
                 properties:
                   effect:
+                    description: Effect indicates what effect this taint has (NoSchedule,
+                      PreferNoSchedule, or NoExecute)
                     type: string
                   key:
+                    description: Key is the taint key to be applied
                     type: string
                   value:
+                    description: Value is an optional value associated with the taint
                     type: string
                 required:
                 - effect
@@ -128,17 +143,23 @@ spec:
             - taint
             type: object
           status:
-            description: status defines the observed state of NodeReadinessGateRule
+            description: status defines the observed state of NodeReadinessRule
             properties:
               appliedNodes:
+                description: AppliedNodes is a list of nodes where this rule has been
+                  successfully applied
                 items:
                   type: string
                 type: array
               completedNodes:
+                description: CompletedNodes lists nodes that have completed bootstrap-mode
+                  evaluation
                 items:
                   type: string
                 type: array
               conditions:
+                description: Conditions represent the latest available observations
+                  of the rule's current state
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -195,17 +216,28 @@ spec:
                   type: object
                 type: array
               dryRunResults:
-                description: Add dry run results
+                description: DryRunResults contains the analysis results when running
+                  in dry-run mode
                 properties:
                   affectedNodes:
+                    description: AffectedNodes is the count of nodes that would be
+                      affected
                     type: integer
                   riskyOperations:
+                    description: RiskyOperations is the count of operations that might
+                      impact workload availability
                     type: integer
                   summary:
+                    description: Summary provides a human-readable summary of the
+                      dry run analysis
                     type: string
                   taintsToAdd:
+                    description: TaintsToAdd is the count of taints that would be
+                      added
                     type: integer
                   taintsToRemove:
+                    description: TaintsToRemove is the count of taints that would
+                      be removed
                     type: integer
                 required:
                 - affectedNodes
@@ -215,40 +247,64 @@ spec:
                 - taintsToRemove
                 type: object
               failedNodes:
+                description: FailedNodes lists nodes where rule application has failed,
+                  with failure details
                 items:
+                  description: NodeFailure represents a failure to apply the rule
+                    to a specific node
                   properties:
                     lastUpdated:
+                      description: LastUpdated is when this failure was last updated
                       format: date-time
                       type: string
                     message:
+                      description: Message is a detailed explanation of the failure
                       type: string
                     nodeName:
+                      description: NodeName is the name of the node where the failure
+                        occurred
                       type: string
                     reason:
+                      description: Reason is a brief reason for the failure
                       type: string
                   required:
                   - lastUpdated
-                  - message
                   - nodeName
                   - reason
                   type: object
                 type: array
               nodeEvaluations:
-                description: Add new status tracking
+                description: NodeEvaluations contains detailed evaluation results
+                  for each affected node
                 items:
+                  description: NodeEvaluation represents the evaluation state of a
+                    single node
                   properties:
                     conditionResults:
+                      description: ConditionResults contains the evaluation results
+                        for each condition
                       items:
+                        description: ConditionEvaluationResult represents the evaluation
+                          of a single condition requirement
                         properties:
                           currentStatus:
+                            description: CurrentStatus is the actual status of the
+                              condition on the node
                             type: string
                           missing:
+                            description: Missing indicates whether the condition is
+                              present on the node
                             type: boolean
                           requiredStatus:
+                            description: RequiredStatus is the status required by
+                              the rule
                             type: string
                           satisfied:
+                            description: Satisfied indicates whether the condition
+                              requirement is met
                             type: boolean
                           type:
+                            description: Type is the name of the evaluated condition
                             type: string
                         required:
                         - currentStatus
@@ -259,11 +315,16 @@ spec:
                         type: object
                       type: array
                     lastEvaluated:
+                      description: LastEvaluated is the timestamp of the most recent
+                        evaluation
                       format: date-time
                       type: string
                     nodeName:
+                      description: NodeName is the name of the evaluated node
                       type: string
                     taintStatus:
+                      description: TaintStatus indicates whether the taint is Present,
+                        Absent, or Unknown on the node
                       type: string
                   required:
                   - conditionResults
@@ -273,7 +334,8 @@ spec:
                   type: object
                 type: array
               observedGeneration:
-                description: Keep existing
+                description: ObservedGeneration reflects the generation of the most
+                  recently observed NodeReadinessRule
                 format: int64
                 type: integer
             type: object

@@ -185,7 +185,7 @@ func (r *ReadinessGateController) markBootstrapCompleted(ctx context.Context, no
 
 // updateNodeEvaluationStatus updates the evaluation status for a specific node
 func (r *ReadinessGateController) updateNodeEvaluationStatus(
-	rule *readinessv1alpha1.NodeReadinessGateRule,
+	rule *readinessv1alpha1.NodeReadinessRule,
 	nodeName string,
 	conditionResults []readinessv1alpha1.ConditionEvaluationResult,
 	taintStatus string,
@@ -214,7 +214,7 @@ func (r *ReadinessGateController) updateNodeEvaluationStatus(
 
 // recordNodeFailure records a failure for a specific node
 func (r *ReadinessGateController) recordNodeFailure(
-	rule *readinessv1alpha1.NodeReadinessGateRule,
+	rule *readinessv1alpha1.NodeReadinessRule,
 	nodeName, reason, message string,
 ) {
 	// Remove any existing failure for this node

@@ -33,7 +33,7 @@ import (
 	nodereadinessiov1alpha1 "github.com/ajaysundark/node-readiness-gate-controller/api/v1alpha1"
 )
 
-var _ = Describe("NodeReadinessGateRule Controller", func() {
+var _ = Describe("NodeReadinessRule Controller", func() {
 	var (
 		ctx                 context.Context
 		readinessController *ReadinessGateController
@@ -54,7 +54,7 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 			Client:    k8sClient,
 			Scheme:    scheme,
 			clientset: fakeClientset,
-			ruleCache: make(map[string]*nodereadinessiov1alpha1.NodeReadinessGateRule),
+			ruleCache: make(map[string]*nodereadinessiov1alpha1.NodeReadinessRule),
 		}
 
 		ruleReconciler = &RuleReconciler{
@@ -72,11 +72,11 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 
 	Context("Rule Reconciliation", func() {
 		It("should handle rule creation and update cache", func() {
-			rule := &nodereadinessiov1alpha1.NodeReadinessGateRule{
+			rule := &nodereadinessiov1alpha1.NodeReadinessRule{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rule",
 				},
-				Spec: nodereadinessiov1alpha1.NodeReadinessGateRuleSpec{
+				Spec: nodereadinessiov1alpha1.NodeReadinessRuleSpec{
 					Conditions: []nodereadinessiov1alpha1.ConditionRequirement{
 						{Type: "Ready", RequiredStatus: corev1.ConditionTrue},
 					},
@@ -109,11 +109,11 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 		})
 
 		It("should handle rule deletion and remove from cache", func() {
-			rule := &nodereadinessiov1alpha1.NodeReadinessGateRule{
+			rule := &nodereadinessiov1alpha1.NodeReadinessRule{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rule-delete",
 				},
-				Spec: nodereadinessiov1alpha1.NodeReadinessGateRuleSpec{
+				Spec: nodereadinessiov1alpha1.NodeReadinessRuleSpec{
 					Conditions: []nodereadinessiov1alpha1.ConditionRequirement{
 						{Type: "Ready", RequiredStatus: corev1.ConditionTrue},
 					},
@@ -169,11 +169,11 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 			defer k8sClient.Delete(ctx, testNode)
 
 			// Now create a rule - this should immediately evaluate the existing node
-			rule := &nodereadinessiov1alpha1.NodeReadinessGateRule{
+			rule := &nodereadinessiov1alpha1.NodeReadinessRule{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "immediate-test-rule",
 				},
-				Spec: nodereadinessiov1alpha1.NodeReadinessGateRuleSpec{
+				Spec: nodereadinessiov1alpha1.NodeReadinessRuleSpec{
 					Conditions: []nodereadinessiov1alpha1.ConditionRequirement{
 						{Type: "TestCondition", RequiredStatus: corev1.ConditionTrue},
 					},
@@ -215,7 +215,7 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 
 			// Verify rule status includes the node
 			Eventually(func() []string {
-				updatedRule := &nodereadinessiov1alpha1.NodeReadinessGateRule{}
+				updatedRule := &nodereadinessiov1alpha1.NodeReadinessRule{}
 				err := k8sClient.Get(ctx, types.NamespacedName{Name: "immediate-test-rule"}, updatedRule)
 				if err != nil {
 					return nil
@@ -225,11 +225,11 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 		})
 
 		It("should handle dry run mode", func() {
-			rule := &nodereadinessiov1alpha1.NodeReadinessGateRule{
+			rule := &nodereadinessiov1alpha1.NodeReadinessRule{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "dry-run-rule",
 				},
-				Spec: nodereadinessiov1alpha1.NodeReadinessGateRuleSpec{
+				Spec: nodereadinessiov1alpha1.NodeReadinessRuleSpec{
 					Conditions: []nodereadinessiov1alpha1.ConditionRequirement{
 						{Type: "Ready", RequiredStatus: corev1.ConditionTrue},
 					},
@@ -251,7 +251,7 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 
 			// Verify dry run results are populated
 			Eventually(func() *nodereadinessiov1alpha1.DryRunResults {
-				updatedRule := &nodereadinessiov1alpha1.NodeReadinessGateRule{}
+				updatedRule := &nodereadinessiov1alpha1.NodeReadinessRule{}
 				err := k8sClient.Get(ctx, types.NamespacedName{Name: "dry-run-rule"}, updatedRule)
 				if err != nil {
 					return nil
@@ -294,11 +294,11 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 		})
 
 		It("should process node changes", func() {
-			rule := &nodereadinessiov1alpha1.NodeReadinessGateRule{
+			rule := &nodereadinessiov1alpha1.NodeReadinessRule{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node-test-rule",
 				},
-				Spec: nodereadinessiov1alpha1.NodeReadinessGateRuleSpec{
+				Spec: nodereadinessiov1alpha1.NodeReadinessRuleSpec{
 					Conditions: []nodereadinessiov1alpha1.ConditionRequirement{
 						{Type: "Ready", RequiredStatus: corev1.ConditionTrue},
 					},
@@ -382,8 +382,8 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 		})
 
 		It("should check rule applicability correctly", func() {
-			rule := &nodereadinessiov1alpha1.NodeReadinessGateRule{
-				Spec: nodereadinessiov1alpha1.NodeReadinessGateRuleSpec{
+			rule := &nodereadinessiov1alpha1.NodeReadinessRule{
+				Spec: nodereadinessiov1alpha1.NodeReadinessRuleSpec{
 					NodeSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							"node-role.kubernetes.io/worker": "",
@@ -417,8 +417,8 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 			Expect(applies).To(BeFalse())
 
 			// Rule without selector should apply to all nodes
-			ruleWithoutSelector := &nodereadinessiov1alpha1.NodeReadinessGateRule{
-				Spec: nodereadinessiov1alpha1.NodeReadinessGateRuleSpec{},
+			ruleWithoutSelector := &nodereadinessiov1alpha1.NodeReadinessRule{
+				Spec: nodereadinessiov1alpha1.NodeReadinessRuleSpec{},
 			}
 
 			applies = readinessController.ruleAppliesTo(ctx, ruleWithoutSelector, nonMatchingNode)
@@ -454,16 +454,16 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 
 	Context("when a new rule is created", func() {
 		var node *corev1.Node
-		var rule *nodereadinessiov1alpha1.NodeReadinessGateRule
+		var rule *nodereadinessiov1alpha1.NodeReadinessRule
 
 		BeforeEach(func() {
 			node = &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{Name: "node1", Labels: map[string]string{"app": "backend"}},
 				Status:     corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: "DBReady", Status: corev1.ConditionFalse}}},
 			}
-			rule = &nodereadinessiov1alpha1.NodeReadinessGateRule{
+			rule = &nodereadinessiov1alpha1.NodeReadinessRule{
 				ObjectMeta: metav1.ObjectMeta{Name: "db-rule"},
-				Spec: nodereadinessiov1alpha1.NodeReadinessGateRuleSpec{
+				Spec: nodereadinessiov1alpha1.NodeReadinessRuleSpec{
 					Conditions:      []nodereadinessiov1alpha1.ConditionRequirement{{Type: "DBReady", RequiredStatus: corev1.ConditionTrue}},
 					Taint:           nodereadinessiov1alpha1.TaintSpec{Key: "db-unready", Effect: corev1.TaintEffectNoSchedule},
 					EnforcementMode: nodereadinessiov1alpha1.EnforcementModeContinuous,
@@ -502,7 +502,7 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 
 			// Verify the status of the rule
 			Eventually(func() []string {
-				updatedRule := &nodereadinessiov1alpha1.NodeReadinessGateRule{}
+				updatedRule := &nodereadinessiov1alpha1.NodeReadinessRule{}
 				_ = k8sClient.Get(ctx, types.NamespacedName{Name: "db-rule"}, updatedRule)
 				return updatedRule.Status.AppliedNodes
 			}, time.Second*5).Should(ContainElement("node1"))
@@ -510,13 +510,13 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 	})
 
 	Context("when a new node is added", func() {
-		var rule *nodereadinessiov1alpha1.NodeReadinessGateRule
+		var rule *nodereadinessiov1alpha1.NodeReadinessRule
 		var newNode *corev1.Node
 
 		BeforeEach(func() {
-			rule = &nodereadinessiov1alpha1.NodeReadinessGateRule{
+			rule = &nodereadinessiov1alpha1.NodeReadinessRule{
 				ObjectMeta: metav1.ObjectMeta{Name: "new-node-rule"},
-				Spec: nodereadinessiov1alpha1.NodeReadinessGateRuleSpec{
+				Spec: nodereadinessiov1alpha1.NodeReadinessRuleSpec{
 					Conditions:      []nodereadinessiov1alpha1.ConditionRequirement{{Type: "TestReady", RequiredStatus: corev1.ConditionTrue}},
 					Taint:           nodereadinessiov1alpha1.TaintSpec{Key: "test-unready", Effect: corev1.TaintEffectNoSchedule},
 					EnforcementMode: nodereadinessiov1alpha1.EnforcementModeContinuous,
@@ -553,7 +553,7 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 
 			// Verify that the rule's status is updated to include the new node
 			Eventually(func() []string {
-				updatedRule := &nodereadinessiov1alpha1.NodeReadinessGateRule{}
+				updatedRule := &nodereadinessiov1alpha1.NodeReadinessRule{}
 				err := k8sClient.Get(ctx, types.NamespacedName{Name: "new-node-rule"}, updatedRule)
 				if err != nil {
 					return nil
@@ -579,7 +579,7 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 	})
 
 	Context("when a rule is deleted", func() {
-		var rule *nodereadinessiov1alpha1.NodeReadinessGateRule
+		var rule *nodereadinessiov1alpha1.NodeReadinessRule
 		var testNode *corev1.Node
 
 		BeforeEach(func() {
@@ -594,9 +594,9 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 					Conditions: []corev1.NodeCondition{{Type: "TestReady", Status: corev1.ConditionFalse}},
 				},
 			}
-			rule = &nodereadinessiov1alpha1.NodeReadinessGateRule{
+			rule = &nodereadinessiov1alpha1.NodeReadinessRule{
 				ObjectMeta: metav1.ObjectMeta{Name: "cleanup-rule"},
-				Spec: nodereadinessiov1alpha1.NodeReadinessGateRuleSpec{
+				Spec: nodereadinessiov1alpha1.NodeReadinessRuleSpec{
 					Conditions:      []nodereadinessiov1alpha1.ConditionRequirement{{Type: "TestReady", RequiredStatus: corev1.ConditionTrue}},
 					Taint:           nodereadinessiov1alpha1.TaintSpec{Key: "cleanup-taint", Effect: corev1.TaintEffectNoSchedule},
 					EnforcementMode: nodereadinessiov1alpha1.EnforcementModeContinuous,
@@ -619,7 +619,7 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 
 			// Verify finalizer was added
 			Eventually(func() []string {
-				updatedRule := &nodereadinessiov1alpha1.NodeReadinessGateRule{}
+				updatedRule := &nodereadinessiov1alpha1.NodeReadinessRule{}
 				_ = k8sClient.Get(ctx, types.NamespacedName{Name: "cleanup-rule"}, updatedRule)
 				return updatedRule.Finalizers
 			}, time.Second*5).Should(ContainElement("nodereadiness.io/cleanup-taints"))
@@ -659,7 +659,7 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 
 			// Verify rule is actually deleted (finalizer removed)
 			Eventually(func() bool {
-				deletedRule := &nodereadinessiov1alpha1.NodeReadinessGateRule{}
+				deletedRule := &nodereadinessiov1alpha1.NodeReadinessRule{}
 				err := k8sClient.Get(ctx, types.NamespacedName{Name: "cleanup-rule"}, deletedRule)
 				return err != nil && client.IgnoreNotFound(err) == nil
 			}, time.Second*10).Should(BeTrue(), "Rule should be fully deleted")
@@ -667,13 +667,13 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 	})
 
 	Context("when a node is deleted", func() {
-		var rule *nodereadinessiov1alpha1.NodeReadinessGateRule
+		var rule *nodereadinessiov1alpha1.NodeReadinessRule
 		var node1, node2 *corev1.Node
 
 		BeforeEach(func() {
-			rule = &nodereadinessiov1alpha1.NodeReadinessGateRule{
+			rule = &nodereadinessiov1alpha1.NodeReadinessRule{
 				ObjectMeta: metav1.ObjectMeta{Name: "delete-node-rule"},
-				Spec: nodereadinessiov1alpha1.NodeReadinessGateRuleSpec{
+				Spec: nodereadinessiov1alpha1.NodeReadinessRuleSpec{
 					Conditions:      []nodereadinessiov1alpha1.ConditionRequirement{{Type: "Ready", RequiredStatus: corev1.ConditionTrue}},
 					Taint:           nodereadinessiov1alpha1.TaintSpec{Key: "unready", Effect: corev1.TaintEffectNoSchedule},
 					EnforcementMode: nodereadinessiov1alpha1.EnforcementModeContinuous,
@@ -699,7 +699,7 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func() int {
-				updatedRule := &nodereadinessiov1alpha1.NodeReadinessGateRule{}
+				updatedRule := &nodereadinessiov1alpha1.NodeReadinessRule{}
 				_ = k8sClient.Get(ctx, types.NamespacedName{Name: "delete-node-rule"}, updatedRule)
 				return len(updatedRule.Status.NodeEvaluations)
 			}, time.Second*5).Should(Equal(2))
@@ -713,7 +713,7 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 
 			// Verify node1 is removed from status
 			Eventually(func() bool {
-				updatedRule := &nodereadinessiov1alpha1.NodeReadinessGateRule{}
+				updatedRule := &nodereadinessiov1alpha1.NodeReadinessRule{}
 				_ = k8sClient.Get(ctx, types.NamespacedName{Name: "delete-node-rule"}, updatedRule)
 				for _, eval := range updatedRule.Status.NodeEvaluations {
 					if eval.NodeName == "node1" {
@@ -725,7 +725,7 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 
 			// Verify node2 is still in status
 			Eventually(func() bool {
-				updatedRule := &nodereadinessiov1alpha1.NodeReadinessGateRule{}
+				updatedRule := &nodereadinessiov1alpha1.NodeReadinessRule{}
 				_ = k8sClient.Get(ctx, types.NamespacedName{Name: "delete-node-rule"}, updatedRule)
 				for _, eval := range updatedRule.Status.NodeEvaluations {
 					if eval.NodeName == "node2" {
@@ -738,7 +738,7 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 	})
 
 	Context("when a rule's nodeSelector changes", func() {
-		var rule *nodereadinessiov1alpha1.NodeReadinessGateRule
+		var rule *nodereadinessiov1alpha1.NodeReadinessRule
 		var prodNode, devNode *corev1.Node
 
 		BeforeEach(func() {
@@ -767,9 +767,9 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 				},
 			}
 
-			rule = &nodereadinessiov1alpha1.NodeReadinessGateRule{
+			rule = &nodereadinessiov1alpha1.NodeReadinessRule{
 				ObjectMeta: metav1.ObjectMeta{Name: "selector-change-rule"},
-				Spec: nodereadinessiov1alpha1.NodeReadinessGateRuleSpec{
+				Spec: nodereadinessiov1alpha1.NodeReadinessRuleSpec{
 					Conditions: []nodereadinessiov1alpha1.ConditionRequirement{
 						{Type: "TestReady", RequiredStatus: corev1.ConditionTrue},
 					},
@@ -826,7 +826,7 @@ var _ = Describe("NodeReadinessGateRule Controller", func() {
 			}, time.Second*2).Should(BeTrue(), "Dev node should not have taint")
 
 			// Update rule to target dev nodes instead of prod nodes
-			updatedRule := &nodereadinessiov1alpha1.NodeReadinessGateRule{}
+			updatedRule := &nodereadinessiov1alpha1.NodeReadinessRule{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "selector-change-rule"}, updatedRule)).To(Succeed())
 			updatedRule.Spec.NodeSelector = &metav1.LabelSelector{
 				MatchLabels: map[string]string{"env": "dev"},

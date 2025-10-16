@@ -45,7 +45,7 @@ var _ = Describe("Node Controller", func() {
 		nodeReconciler      *NodeReconciler
 		fakeClientset       *fake.Clientset
 		node                *corev1.Node
-		rule                *nodereadinessiov1alpha1.NodeReadinessGateRule
+		rule                *nodereadinessiov1alpha1.NodeReadinessRule
 		namespacedName      types.NamespacedName
 	)
 
@@ -57,7 +57,7 @@ var _ = Describe("Node Controller", func() {
 			Client:    k8sClient,
 			Scheme:    k8sClient.Scheme(),
 			clientset: fakeClientset,
-			ruleCache: make(map[string]*nodereadinessiov1alpha1.NodeReadinessGateRule),
+			ruleCache: make(map[string]*nodereadinessiov1alpha1.NodeReadinessRule),
 		}
 
 		nodeReconciler = &NodeReconciler{
@@ -84,11 +84,11 @@ var _ = Describe("Node Controller", func() {
 			},
 		}
 
-		rule = &nodereadinessiov1alpha1.NodeReadinessGateRule{
+		rule = &nodereadinessiov1alpha1.NodeReadinessRule{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: ruleName,
 			},
-			Spec: nodereadinessiov1alpha1.NodeReadinessGateRuleSpec{
+			Spec: nodereadinessiov1alpha1.NodeReadinessRuleSpec{
 				Conditions: []nodereadinessiov1alpha1.ConditionRequirement{
 					{Type: conditionType, RequiredStatus: corev1.ConditionTrue},
 				},
@@ -116,7 +116,7 @@ var _ = Describe("Node Controller", func() {
 		k8sClient.Delete(ctx, node)
 
 		// Remove finalizers from rule before deleting to avoid stuck deletion
-		updatedRule := &nodereadinessiov1alpha1.NodeReadinessGateRule{}
+		updatedRule := &nodereadinessiov1alpha1.NodeReadinessRule{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: ruleName}, updatedRule); err == nil {
 			updatedRule.Finalizers = nil
 			k8sClient.Update(ctx, updatedRule)

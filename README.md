@@ -497,6 +497,20 @@ For more information: `make help`
 
 This project was developed with significant assistance from Claude (Anthropic) and Gemini (Google) AI coding assistants for code generation,  design, testing, and documentation.
 
+## Roadmap and Future Work
+
+See [SCALABILITY_PLAN.md](SCALABILITY_PLAN.md) for detailed plans on:
+
+- **Phase 1**: Add `NodeReadinessEvaluation` CRD for per-node status
+- **Phase 2**: Migrate rule status to aggregated metrics
+- **Phase 3**: Optimize status updates with debouncing and batching
+
+**Goals:**
+- Scale to 10,000+ nodes without API throttling
+- Reduce rule status size to ~1 KB
+- Maintain per-node visibility via separate evaluation objects
+- Sub-second status update latency
+
 ## License
 
 Copyright 2025.
