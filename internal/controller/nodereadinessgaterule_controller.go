@@ -34,7 +34,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	readinessv1alpha1 "github.com/ajaysundark/node-readiness-gate-controller/api/v1alpha1"
@@ -681,9 +683,14 @@ func (r *RuleReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager)
 		return err
 	}
 
-	// Watch for changes to the primary resource NodeReadinessGateRule
+	// Watch for changes to the primary resource NodeReadinessRule
 	err = c.Watch(source.Kind(mgr.GetCache(), &readinessv1alpha1.NodeReadinessGateRule{},
-		&handler.TypedEnqueueRequestForObject[*readinessv1alpha1.NodeReadinessGateRule]{}))
+		&handler.TypedEnqueueRequestForObject[*readinessv1alpha1.NodeReadinessGateRule]{},
+		predicate.TypedFuncs[*readinessv1alpha1.NodeReadinessGateRule]{
+			UpdateFunc: func(tue event.TypedUpdateEvent[*readinessv1alpha1.NodeReadinessGateRule]) bool {
+				return tue.ObjectOld.GetGeneration() != tue.ObjectNew.GetGeneration() // Only reconcile on spec changes
+			},
+		}))
 	if err != nil {
 		return err
 	}
