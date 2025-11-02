@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -218,7 +219,6 @@ func (r *ReadinessGateController) processAllNodesForRule(ctx context.Context, ru
 	log.Info("Processing all nodes for rule", "rule", rule.Name, "totalNodes", len(nodeList.Items))
 
 	var appliedNodes []string
-	var completedNodes []string
 	for _, node := range nodeList.Items {
 		if r.ruleAppliesTo(ctx, rule, &node) {
 			appliedNodes = append(appliedNodes, node.Name)
@@ -228,19 +228,12 @@ func (r *ReadinessGateController) processAllNodesForRule(ctx context.Context, ru
 				log.Error(err, "Failed to evaluate node for rule", "rule", rule.Name, "node", node.Name)
 				r.recordNodeFailure(rule, node.Name, "EvaluationError", err.Error())
 			}
-			// Check if bootstrap completed for bootstrap-only rules
-			if rule.Spec.EnforcementMode == readinessv1alpha1.EnforcementModeBootstrapOnly {
-				if r.isBootstrapCompleted(node.Name, rule.Name) {
-					completedNodes = append(completedNodes, node.Name)
-				}
-			}
 		}
 	}
 
 	// Update status
 	rule.Status.ObservedGeneration = rule.Generation
 	rule.Status.AppliedNodes = appliedNodes
-	rule.Status.CompletedNodes = completedNodes
 
 	log.Info("Completed processing nodes for rule", "rule", rule.Name, "processedCount", len(appliedNodes))
 	return nil
@@ -418,7 +411,37 @@ func (r *ReadinessGateController) removeRuleFromCache(ctx context.Context, ruleN
 
 // updateRuleStatus updates the status of a NodeReadinessGateRule
 func (r *ReadinessGateController) updateRuleStatus(ctx context.Context, rule *readinessv1alpha1.NodeReadinessGateRule) error {
-	return r.Status().Update(ctx, rule)
+	log := ctrl.LoggerFrom(ctx)
+
+	log.V(1).Info("Updating rule status",
+		"rule", rule.Name,
+		"nodeEvaluations", len(rule.Status.NodeEvaluations),
+		"appliedNodes", len(rule.Status.AppliedNodes))
+
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latestRule := &readinessv1alpha1.NodeReadinessGateRule{}
+		if err := r.Get(ctx, client.ObjectKey{Name: rule.Name}, latestRule); err != nil {
+			return err
+		}
+
+		// Merge our status updates into fresh version
+		// This ensures we're updating based on the latest resourceVersion
+		latestRule.Status.NodeEvaluations = rule.Status.NodeEvaluations
+		latestRule.Status.AppliedNodes = rule.Status.AppliedNodes
+		latestRule.Status.FailedNodes = rule.Status.FailedNodes
+		latestRule.Status.ObservedGeneration = rule.Status.ObservedGeneration
+		latestRule.Status.DryRunResults = rule.Status.DryRunResults
+
+		if err := r.Status().Update(ctx, latestRule); err != nil {
+			log.V(1).Info("Status update conflict, will retry",
+				"rule", rule.Name,
+				"error", err.Error())
+			return err
+		}
+
+		log.V(1).Info("Successfully updated rule status", "rule", rule.Name)
+		return nil
+	})
 }
 
 // processDryRun processes dry run for a rule

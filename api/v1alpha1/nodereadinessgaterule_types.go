@@ -68,7 +68,6 @@ type NodeReadinessGateRuleStatus struct {
 
 	// Add new status tracking
 	NodeEvaluations []NodeEvaluation `json:"nodeEvaluations,omitempty"`
-	CompletedNodes  []string         `json:"completedNodes,omitempty"` // For bootstrap-only
 	FailedNodes     []NodeFailure    `json:"failedNodes,omitempty"`
 
 	// Add dry run results

@@ -219,11 +219,6 @@ func (in *NodeReadinessGateRuleStatus) DeepCopyInto(out *NodeReadinessGateRuleSt
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
-	if in.CompletedNodes != nil {
-		in, out := &in.CompletedNodes, &out.CompletedNodes
-		*out = make([]string, len(*in))
-		copy(*out, *in)
-	}
 	if in.FailedNodes != nil {
 		in, out := &in.FailedNodes, &out.FailedNodes
 		*out = make([]NodeFailure, len(*in))
