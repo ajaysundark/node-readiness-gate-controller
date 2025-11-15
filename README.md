@@ -2,16 +2,27 @@
 
 A Kubernetes controller that manages node taints based on multiple readiness gate conditions, providing fine-grained control over when nodes are ready to accept workloads.
 
+### Update: This project is now migrated to a kubernetes-sig project: https://github.com/kubernetes-sigs/node-readiness-controller 
+
+Please follow the official project for updates and contributions.
+
+---
+
 ## Overview
 
 The Node Readiness Gates Controller extends Kubernetes' node readiness model by allowing you to define custom readiness rules that evaluate multiple node conditions simultaneously. It automatically manages node taints to prevent scheduling until all specified conditions are satisfied.
+
+### Slides
+
+Below slides are from Unconference Session at Maintainer Summit, KubeCon NA 2025, Atlanta, US -
+
+https://ajaysundark.github.io/node-readiness-gate-controller/
 
 ### Demo
 
 **Node Readiness concept in Kind cluster**
 
-TODO:(ajaysundark) figure out how to embed video demo!
-https://drive.google.com/file/d/1Q2vCU7FYUrEkHDeQV5NneCH_MNoFshvH/view?usp=sharing
+Check demo: https://drive.google.com/file/d/1Q2vCU7FYUrEkHDeQV5NneCH_MNoFshvH/view?usp=sharing
 
 ### Key Features
 
